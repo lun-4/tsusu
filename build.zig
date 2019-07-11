@@ -3,6 +3,12 @@ const Builder = @import("std").build.Builder;
 pub fn build(b: *Builder) void {
     const mode = b.standardReleaseOptions();
     const exe = b.addExecutable("tsusu", "src/main.zig");
+
+    // ???
+    //const exe_daemon = b.addExecutable("tsusud", "src/daemon.zig");
+    //exe_daemon.setBuildMode(mode);
+    //exe_daemon.install();
+
     exe.setBuildMode(mode);
     exe.install();
 
