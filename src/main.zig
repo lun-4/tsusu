@@ -31,18 +31,31 @@ pub const Context = struct {
 
         std.mem.copy(u8, &sockpath, path);
 
-        std.debug.warn("sockpath: {}\n", path);
-        return std.os.open(path, std.os.O_RDONLY, 0) catch |err| {
-            if (err == error.FileNotFound) {
-                try spawnDaemon(sockpath);
-            } else {
-                return err;
-            }
+        //const sockfd = try std.os.socket(std.os.AF_UNIX);
+        const sockfd = try std.os.socket(std.os.AF_UNIX, std.os.SOCK_STREAM, 0);
 
-            // wait 500ms until doing it again
+        var addr = std.os.sockaddr{
+            .un = std.os.sockaddr_un{
+                .family = std.os.AF_UNIX,
+                .path = [_]u8{0} ** 108,
+            },
+        };
+
+        std.mem.copy(u8, &addr.un.path, sockpath);
+
+        std.os.connect(
+            sockfd,
+            &addr,
+            @intCast(u32, std.mem.len(u8, &sockpath) + 2),
+        ) catch |err| {
+            try spawnDaemon(sockpath);
+
+            // assuming spawning doesn't take more than 500ms.
             std.time.sleep(500 * std.time.millisecond);
             return try self.checkDaemon();
         };
+
+        return sockfd;
     }
 };
 
@@ -75,6 +88,9 @@ pub fn main() anyerror!void {
 
     var ctx = Context.init(allocator, args_it);
     const sock = try ctx.checkDaemon();
+    defer std.os.close(sock);
+
+    std.debug.warn("SOCK FD: {}\n", sock);
 
     //const mode = try (args_it.next(allocator) orelse "list");
 }

@@ -10,24 +10,43 @@ pub fn main(sockpath: [108]u8) anyerror!void {
     }
     std.debug.warn("\n");
 
-    // TODO make this work, it doesnt :(
+    var addr = std.os.sockaddr{
+        .un = std.os.sockaddr_un{
+            .family = std.os.AF_UNIX,
+            .path = [_]u8{0} ** 108,
+        },
+    };
 
-    var addr: std.os.sockaddr = undefined;
-
-    @memset(@ptrCast([*]volatile u8, &addr), 0, @sizeOf(std.os.sockaddr));
-
-    addr.un.family = std.os.AF_UNIX;
     std.mem.copy(u8, &addr.un.path, sockpath);
 
-    //var addr = std.os.sockaddr{
-    //    .un = std.os.sockaddr_un{
-    //        .family = std.os.AF_UNIX,
-    //        .path = [_]u8{0} ** 108,
-    //    },
-    //};
+    // os.bind, accept, and connect, have local hacks.
 
-    //std.mem.copy(u8, &addr.un.path, sockpath);
+    try std.os.bind(
+        sockfd,
+        &addr,
+        @intCast(u32, std.mem.len(u8, &sockpath) + 2),
+    );
 
-    try std.os.bind(sockfd, &addr);
-    std.time.sleep(10 * std.time.second);
+    var cli_addr = std.os.sockaddr{
+        .un = std.os.sockaddr_un{
+            .family = std.os.AF_UNIX,
+            .path = [_]u8{0} ** 108,
+        },
+    };
+
+    std.debug.warn("bind done! {}\n", sockfd);
+
+    while (true) {
+        var sockaddr_size = @intCast(u32, std.mem.len(u8, &cli_addr.un.path) + 2);
+
+        var clifd = try std.os.accept4(
+            sockfd,
+            &cli_addr,
+            &sockaddr_size,
+            0,
+        );
+        defer std.os.close(clifd);
+        std.debug.warn("client: {}\n", clifd);
+    }
+    std.time.sleep(15 * std.time.second);
 }
