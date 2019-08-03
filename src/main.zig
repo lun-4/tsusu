@@ -21,27 +21,19 @@ pub const Context = struct {
         // we check if the tsusu daemon is available under the unix socket
         // on ~/.local/share/tsusu.sock, if not, we
         const home = std.os.getenv("HOME").?;
-        var sockpath: [108]u8 = undefined;
-        std.mem.secureZero(u8, &sockpath);
 
         var path = try std.fs.path.resolve(self.allocator, [_][]const u8{
             home,
             ".local/share/tsusu.sock",
         });
 
-        std.mem.copy(u8, &sockpath, path);
-
-        //const sockfd = try std.os.socket(std.os.AF_UNIX);
-        const sockfd = try std.os.socket(std.os.AF_UNIX, std.os.SOCK_STREAM, 0);
-
+        // TODO will be replaced by whatever comes out of zig 0.5.0
         var addr = std.os.sockaddr{
             .un = std.os.sockaddr_un{
                 .family = std.os.AF_UNIX,
                 .path = [_]u8{0} ** 108,
             },
         };
-
-        std.mem.copy(u8, &addr.un.path, sockpath);
 
         std.os.connect(
             sockfd,
@@ -50,7 +42,9 @@ pub const Context = struct {
         ) catch |err| {
             try spawnDaemon(sockpath);
 
-            // assuming spawning doesn't take more than 500ms.
+            // this assumes spawning won't take more than 500ms.
+            // a better solution would be us spawning a socket and waiting
+            // for the daemon to contact back.
             std.time.sleep(500 * std.time.millisecond);
             return try self.checkDaemon();
         };
@@ -73,7 +67,7 @@ fn spawnDaemon(sockpath: [108]u8) !void {
     // TODO setsid
     // TODO umask
 
-    try daemon.main(sockpath);
+    daemon.main(sockpath);
 }
 
 pub fn main() anyerror!void {
