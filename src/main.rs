@@ -1,5 +1,5 @@
 mod daemon;
-use daemon::daemon_main;
+use daemon::{daemon_main, get_sockpath};
 
 //use std::os::unix;
 use std::os::unix::net::UnixStream;
@@ -25,8 +25,7 @@ impl Context {
 
         self.tries += 1;
 
-        let home_str = std::env::var("HOME").expect("Failed to get HOME variable");
-        let sockpath = std::path::Path::new(&home_str).join(".local/share/tsusu.sock");
+        let sockpath = get_sockpath();
 
         match UnixStream::connect(sockpath) {
             Ok(stream) => return Ok(stream),
@@ -43,6 +42,8 @@ fn spawn_daemon() {
     let exe = std::env::args()
         .next()
         .expect("Failed to get executable path");
+
+    // TODO assign to cmd, sleep for 5ms, check cmd's return value
 
     // let mut cmd =
     std::process::Command::new(exe)
@@ -70,5 +71,5 @@ fn main() {
         .connect_daemon()
         .expect("Failed to connect to main daemon");
 
-    println!("stream: {:?}", stream);
+    println!("got stream: {:?}", stream);
 }
