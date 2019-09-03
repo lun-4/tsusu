@@ -1,3 +1,6 @@
+mod daemon;
+use daemon::daemon_main;
+
 //use std::os::unix;
 use std::os::unix::net::UnixStream;
 
@@ -56,7 +59,7 @@ fn main() {
     match arg0.as_ref().map(String::as_ref) {
         Some("_daemon") => {
             println!("got _daemon, starting daemon");
-            //TODO daemon_main();
+            daemon_main();
             return;
         }
         Some(_) | None => {}
