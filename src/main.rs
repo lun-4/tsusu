@@ -63,7 +63,7 @@ fn main() {
             daemon_main();
             return;
         }
-        Some(_) | None => {}
+        _ => {}
     }
 
     let mut context = Context::new();
