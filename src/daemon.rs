@@ -51,12 +51,11 @@ fn process_sock(sock: &mut UnixStream) -> EndResult {
 pub fn daemon_main() {
     let tsu_dir = get_tsusu_runtime_dir();
 
-    match std::fs::create_dir(tsu_dir) {
-        Err(error) => match error.kind() {
+    if let Err(error) = std::fs::create_dir(tsu_dir) {
+        match error.kind() {
             std::io::ErrorKind::AlreadyExists => (),
             _ => panic!("Failed to create tsusu runtime dir: {}", error),
-        },
-        _ => (),
+        }
     }
 
     let sockpath = get_sockpath();

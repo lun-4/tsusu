@@ -1,5 +1,11 @@
 mod daemon;
-use daemon::{daemon_main, get_sockpath};
+use daemon::{daemon_main, get_pidpath, get_sockpath};
+
+use nix;
+use nix::unistd::Pid;
+
+use std::io::prelude::*;
+use std::io::BufReader;
 
 //use std::os::unix;
 use std::os::unix::net::UnixStream;
@@ -57,6 +63,7 @@ enum Mode {
     Daemon,
     List,
     Help,
+    Stop,
 }
 
 fn print_help() {
@@ -76,6 +83,7 @@ fn main() {
         None => Mode::Help,
         Some("help") => Mode::Help,
         Some("list") => Mode::List,
+        Some("stop") => Mode::Stop,
 
         Some(_) => {
             panic!("cock and balls, huh?");
@@ -86,6 +94,26 @@ fn main() {
 
     match mode {
         Mode::Daemon => return,
+        Mode::Stop => {
+            let pidpath = get_pidpath();
+            let pidfile = std::fs::File::open(pidpath).expect("failed to open pid file");
+
+            let mut reader = BufReader::new(pidfile);
+            let mut buffer = String::new();
+
+            let _ = reader.read_line(&mut buffer);
+
+            let pid = buffer
+                .parse::<nix::pty::SessionId>()
+                .expect("Invalid pid number");
+
+            // TODO give nicer messages for given result instead of .expect
+            nix::sys::signal::kill(Pid::from_raw(pid), nix::sys::signal::Signal::SIGTERM)
+                .expect("Failed to kill daemon");
+
+            println!("successfully stopped pid {}", pid);
+            return;
+        }
         Mode::Help => {
             print_help();
             return;
