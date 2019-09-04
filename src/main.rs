@@ -52,18 +52,36 @@ fn spawn_daemon() {
         .expect("Failed to start daemon");
 }
 
-fn main() {
-    let mut args = std::env::args();
-    let _ = args.next();
-    let arg0 = args.next();
+#[derive(PartialEq, Debug)]
+enum Mode {
+    Daemon,
+    List,
+    Help,
+}
 
-    match arg0.as_ref().map(String::as_ref) {
+fn main() {
+    let mut args = std::env::args().skip(1);
+
+    let mode = match args.next().as_ref().map(String::as_str) {
         Some("_daemon") => {
             println!("got _daemon, starting daemon");
             daemon_main();
-            return;
+            Mode::Daemon
         }
-        _ => {}
+
+        None => Mode::Help,
+        Some("help") => Mode::Help,
+        Some("list") => Mode::List,
+
+        Some(_) => {
+            panic!("cock and balls, huh?");
+        }
+    };
+
+    println!("mode: {:?}", mode);
+
+    if mode == Mode::Daemon {
+        return;
     }
 
     let mut context = Context::new();
