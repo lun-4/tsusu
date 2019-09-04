@@ -108,7 +108,7 @@ fn main() {
                 .expect("Invalid pid number");
 
             // TODO give nicer messages for given result instead of .expect
-            nix::sys::signal::kill(Pid::from_raw(pid), nix::sys::signal::Signal::SIGTERM)
+            nix::sys::signal::kill(Pid::from_raw(pid), nix::sys::signal::Signal::SIGINT)
                 .expect("Failed to kill daemon");
 
             println!("successfully stopped pid {}", pid);

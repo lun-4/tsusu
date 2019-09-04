@@ -1,3 +1,5 @@
+use nix;
+
 use std::io::prelude::*;
 use std::net::Shutdown;
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -48,6 +50,11 @@ fn process_sock(sock: &mut UnixStream) -> EndResult {
     return EndResult::Keep;
 }
 
+extern "C" fn handle_sigint(_signal: i32) {
+    println!("COCK");
+    std::process::exit(0);
+}
+
 pub fn daemon_main() {
     let tsu_dir = get_tsusu_runtime_dir();
 
@@ -61,9 +68,19 @@ pub fn daemon_main() {
     let sockpath = get_sockpath();
 
     // TODO destroy tsusu.pid
+    // TODO wrap pid/pidfile and listener into a Context, then use that
+    // context as the signal handler
     write_self_pid();
-
     let listener = UnixListener::bind(sockpath).expect("Failed to connect to socket");
+
+    // here we install a handler for SIGINT to delete the pid and sock files
+    unsafe {
+        nix::sys::signal::signal(
+            nix::sys::signal::Signal::SIGINT,
+            nix::sys::signal::SigHandler::Handler(handle_sigint),
+        )
+    }
+    .unwrap();
 
     println!("start listener");
 
