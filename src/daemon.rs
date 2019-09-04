@@ -2,14 +2,19 @@ use std::io::prelude::*;
 use std::net::Shutdown;
 use std::os::unix::net::{UnixListener, UnixStream};
 
-pub fn get_sockpath() -> std::path::PathBuf {
+pub fn get_tsusu_runtime_dir() -> std::path::PathBuf {
     let exec_dir = dirs::runtime_dir().unwrap();
-    std::path::Path::new(&exec_dir).join("tsusu/sock")
+    std::path::Path::new(&exec_dir).join("tsusu")
+}
+
+pub fn get_sockpath() -> std::path::PathBuf {
+    let tsu_dir = get_tsusu_runtime_dir();
+    std::path::Path::new(&tsu_dir).join("sock")
 }
 
 pub fn get_pidpath() -> std::path::PathBuf {
-    let exec_dir = dirs::runtime_dir().unwrap();
-    std::path::Path::new(&exec_dir).join("tsusu/pid")
+    let tsu_dir = get_tsusu_runtime_dir();
+    std::path::Path::new(&tsu_dir).join("pid")
 }
 
 fn write_self_pid() {
@@ -44,6 +49,16 @@ fn process_sock(sock: &mut UnixStream) -> EndResult {
 }
 
 pub fn daemon_main() {
+    let tsu_dir = get_tsusu_runtime_dir();
+
+    match std::fs::create_dir(tsu_dir) {
+        Err(error) => match error.kind() {
+            std::io::ErrorKind::AlreadyExists => (),
+            _ => panic!("Failed to create tsusu runtime dir: {}", error),
+        },
+        _ => (),
+    }
+
     let sockpath = get_sockpath();
 
     // TODO destroy tsusu.pid
@@ -53,11 +68,11 @@ pub fn daemon_main() {
 
     println!("start listener");
 
-    // TODO read some config file and start processes
+    // TODO read some config file and start child processes
 
     for stream in listener.incoming() {
         match stream {
-            // TODO spawn threads, maybe?
+            // TODO spawn a thread, maybe?
             Ok(mut sock) => {
                 let res = process_sock(&mut sock);
                 if res == EndResult::Stop {
@@ -73,4 +88,5 @@ pub fn daemon_main() {
 
     println!("ending listener");
     close_unix_listener(listener);
+    //destroy_pid_file(listener);
 }

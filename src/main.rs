@@ -59,6 +59,10 @@ enum Mode {
     Help,
 }
 
+fn print_help() {
+    println!("awoo, bitches");
+}
+
 fn main() {
     let mut args = std::env::args().skip(1);
 
@@ -80,8 +84,13 @@ fn main() {
 
     println!("mode: {:?}", mode);
 
-    if mode == Mode::Daemon {
-        return;
+    match mode {
+        Mode::Daemon => return,
+        Mode::Help => {
+            print_help();
+            return;
+        }
+        _ => (),
     }
 
     let mut context = Context::new();
@@ -90,4 +99,13 @@ fn main() {
         .expect("Failed to connect to main daemon");
 
     println!("got stream: {:?}", stream);
+
+    match mode {
+        Mode::List => {
+            println!("TODO send list command");
+        }
+        mode => {
+            eprintln!("invalid mode: {:?}", mode);
+        }
+    }
 }
