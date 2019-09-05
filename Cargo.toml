@@ -9,3 +9,4 @@ edition = "2018"
 [dependencies]
 dirs = "2.0.2"
 nix = "0.15.0"
+signal-hook = "0.1.10"

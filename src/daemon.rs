@@ -1,8 +1,9 @@
-use nix;
-
 use std::io::prelude::*;
 use std::net::Shutdown;
 use std::os::unix::net::{UnixListener, UnixStream};
+
+use signal_hook;
+use signal_hook::iterator::Signals;
 
 pub fn get_tsusu_runtime_dir() -> std::path::PathBuf {
     let exec_dir = dirs::runtime_dir().unwrap();
@@ -19,8 +20,7 @@ pub fn get_pidpath() -> std::path::PathBuf {
     std::path::Path::new(&tsu_dir).join("pid")
 }
 
-fn write_self_pid() {
-    let pidpath = get_pidpath();
+fn write_self_pid(pidpath: &std::path::PathBuf) {
     let pidfile = std::fs::File::create(pidpath).expect("failed to open pid file");
     let mut writer = std::io::BufWriter::new(&pidfile);
     let pid = std::process::id();
@@ -28,11 +28,15 @@ fn write_self_pid() {
     write!(&mut writer, "{}", pid).expect("failed to write pid file");
 }
 
-fn close_unix_listener(listener: UnixListener) {
+fn close_unix_listener(listener: &UnixListener) {
     // we should delete the file to make sure connections to it fail
     let addr = listener.local_addr().unwrap();
     if let Some(x) = addr.as_pathname() {
-        let _ = std::fs::remove_file(x);
+        if let Err(e) = std::fs::remove_file(x) {
+            println!("Failed to destroy sock file: {}", e);
+        } else {
+            println!("successfully closed {:?}", x);
+        }
     }
 }
 
@@ -50,9 +54,47 @@ fn process_sock(sock: &mut UnixStream) -> EndResult {
     return EndResult::Keep;
 }
 
-extern "C" fn handle_sigint(_signal: i32) {
-    println!("COCK");
-    std::process::exit(0);
+struct Context {
+    sockpath: std::path::PathBuf,
+    pidpath: std::path::PathBuf,
+    listener: Option<UnixListener>,
+}
+
+impl Context {
+    fn new() -> Context {
+        Context {
+            sockpath: get_sockpath(),
+            pidpath: get_pidpath(),
+            listener: None,
+        }
+    }
+
+    fn start(&mut self) -> std::io::Result<()> {
+        write_self_pid(&self.pidpath);
+
+        match UnixListener::bind(&self.sockpath) {
+            Ok(listener) => {
+                self.listener = Some(listener);
+                Ok(())
+            }
+
+            Err(e) => Err(e),
+        }
+    }
+
+    fn stop(&self) {
+        if let Some(listener) = &self.listener {
+            close_unix_listener(listener);
+        }
+
+        let _ = std::fs::remove_file(&self.pidpath);
+    }
+}
+
+impl Drop for Context {
+    fn drop(&mut self) {
+        self.stop();
+    }
 }
 
 pub fn daemon_main() {
@@ -65,44 +107,46 @@ pub fn daemon_main() {
         }
     }
 
-    let sockpath = get_sockpath();
+    let mut ctx = Context::new();
 
     // TODO destroy tsusu.pid
-    // TODO wrap pid/pidfile and listener into a Context, then use that
-    // context as the signal handler
-    write_self_pid();
-    let listener = UnixListener::bind(sockpath).expect("Failed to connect to socket");
+    ctx.start().unwrap();
 
-    // here we install a handler for SIGINT to delete the pid and sock files
-    unsafe {
-        nix::sys::signal::signal(
-            nix::sys::signal::Signal::SIGINT,
-            nix::sys::signal::SigHandler::Handler(handle_sigint),
-        )
-    }
-    .unwrap();
+    let signals = Signals::new(&[signal_hook::SIGINT]).unwrap();
 
     println!("start listener");
 
     // TODO read some config file and start child processes
 
-    for stream in listener.incoming() {
-        match stream {
-            // TODO spawn a thread, maybe?
-            Ok(mut sock) => {
-                let res = process_sock(&mut sock);
-                if res == EndResult::Stop {
-                    break;
+    if let Some(listener) = &ctx.listener {
+        listener.set_nonblocking(true).unwrap();
+
+        // TODO very bad approach, uses lots of cpu, use tokio?
+        //
+        // the first approach was staying with listener.incoming() but
+        // it is blocking and i cant keep the signal handler in a thread
+        // because i cant copy Context, just move
+        //
+        // help.
+        loop {
+            for sig in signals.pending() {
+                if sig == signal_hook::SIGINT {
+                    &ctx.stop();
+                    std::process::exit(0);
                 }
             }
 
-            Err(_) => {
-                break;
+            match listener.accept() {
+                // TODO spawn a thread, maybe?
+                Ok((mut sock, _addr)) => {
+                    let res = process_sock(&mut sock);
+                    if res == EndResult::Stop {
+                        break;
+                    }
+                }
+
+                Err(_) => (),
             }
         }
     }
-
-    println!("ending listener");
-    close_unix_listener(listener);
-    //destroy_pid_file(listener);
 }
