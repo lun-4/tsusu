@@ -96,7 +96,14 @@ fn main() {
         Mode::Daemon => return,
         Mode::Stop => {
             let pidpath = get_pidpath();
-            let pidfile = std::fs::File::open(pidpath).expect("failed to open pid file");
+            let pidfile = match std::fs::File::open(pidpath) {
+                Ok(val) => val,
+                Err(e) => {
+                    println!("failed to open pid file: {}", e);
+                    println!("\tis the tsusu daemon running?");
+                    return;
+                }
+            };
 
             let mut reader = BufReader::new(pidfile);
             let mut buffer = String::new();
@@ -107,9 +114,19 @@ fn main() {
                 .parse::<nix::pty::SessionId>()
                 .expect("Invalid pid number");
 
-            // TODO give nicer messages for given result instead of .expect
-            nix::sys::signal::kill(Pid::from_raw(pid), nix::sys::signal::Signal::SIGINT)
-                .expect("Failed to kill daemon");
+            if let Err(nix::Error::Sys(e)) =
+                nix::sys::signal::kill(Pid::from_raw(pid), nix::sys::signal::Signal::SIGINT)
+            {
+                if e == nix::errno::Errno::ESRCH {
+                    println!("daemon not running");
+                } else {
+                    println!("failed to stop daemon: {}", e);
+                }
+
+                return;
+            }
+
+            // TODO destroy tsusu runtime dir
 
             println!("successfully stopped pid {}", pid);
             return;
