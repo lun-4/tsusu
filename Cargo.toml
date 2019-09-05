@@ -9,4 +9,6 @@ edition = "2018"
 [dependencies]
 dirs = "2.0.2"
 nix = "0.15.0"
-signal-hook = "0.1.10"
+signal-hook = { version = "0.1.10", features = ["mio-support"] }
+mio = "0.6"
+mio-uds = "0.6"

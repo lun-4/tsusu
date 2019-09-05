@@ -139,11 +139,15 @@ fn main() {
     }
 
     let mut context = Context::new();
-    let stream = context
+    let mut stream = context
         .connect_daemon()
         .expect("Failed to connect to main daemon");
 
     println!("got stream: {:?}", stream);
+
+    let mut helo_msg = String::new();
+    stream.read_to_string(&mut helo_msg).unwrap();
+    println!("cli: first msg: '{}'", helo_msg);
 
     match mode {
         Mode::List => {

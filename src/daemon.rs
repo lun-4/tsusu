@@ -1,9 +1,12 @@
 use std::io::prelude::*;
 use std::net::Shutdown;
-use std::os::unix::net::{UnixListener, UnixStream};
+//use std::os::unix::net::{UnixListener, UnixStream};
 
 use signal_hook;
 use signal_hook::iterator::Signals;
+
+use mio::*;
+use mio_uds::{UnixListener, UnixStream};
 
 pub fn get_tsusu_runtime_dir() -> std::path::PathBuf {
     let exec_dir = dirs::runtime_dir().unwrap();
@@ -40,20 +43,6 @@ fn close_unix_listener(listener: &UnixListener) {
     }
 }
 
-#[derive(PartialEq)]
-enum EndResult {
-    Keep,
-    Stop,
-}
-
-fn process_sock(sock: &mut UnixStream) -> EndResult {
-    // TODO proper error handling
-    sock.write_all(b"HELO;").unwrap();
-    sock.shutdown(Shutdown::Both).expect("sock shutdown failed");
-
-    return EndResult::Keep;
-}
-
 struct Context {
     sockpath: std::path::PathBuf,
     pidpath: std::path::PathBuf,
@@ -82,12 +71,21 @@ impl Context {
         }
     }
 
+    fn handle_socket(&self, mut sock: UnixStream) {
+        sock.write_all(b"HELO;")
+            .expect("failed to send helo message");
+
+        sock.shutdown(Shutdown::Both).expect("sock shutdown failed");
+    }
+
+    // Stops the application
     fn stop(&self) {
         if let Some(listener) = &self.listener {
             close_unix_listener(listener);
         }
 
         let _ = std::fs::remove_file(&self.pidpath);
+        std::process::exit(0);
     }
 }
 
@@ -96,6 +94,9 @@ impl Drop for Context {
         self.stop();
     }
 }
+
+const LISTENER: Token = Token(0);
+const SIGNAL: Token = Token(1);
 
 pub fn daemon_main() {
     let tsu_dir = get_tsusu_runtime_dir();
@@ -108,44 +109,46 @@ pub fn daemon_main() {
     }
 
     let mut ctx = Context::new();
+    ctx.start().expect("failed to start");
 
-    // TODO destroy tsusu.pid
-    ctx.start().unwrap();
-
-    let signals = Signals::new(&[signal_hook::SIGINT]).unwrap();
+    let signals = Signals::new(&[signal_hook::SIGINT]).expect("failed to bind signals");
 
     println!("start listener");
+
+    let poll = Poll::new().expect("failed to create poll");
+    let mut events = Events::with_capacity(512);
+    poll.register(&signals, SIGNAL, Ready::readable(), PollOpt::edge())
+        .expect("failed to register signal handler");
 
     // TODO read some config file and start child processes
 
     if let Some(listener) = &ctx.listener {
-        listener.set_nonblocking(true).unwrap();
+        poll.register(
+            listener,
+            LISTENER,
+            Ready::readable() | Ready::writable(),
+            PollOpt::edge(),
+        )
+        .expect("failed to register socket listener");
 
-        // TODO very bad approach, uses lots of cpu, use tokio?
-        //
-        // the first approach was staying with listener.incoming() but
-        // it is blocking and i cant keep the signal handler in a thread
-        // because i cant copy Context, just move
-        //
-        // help.
         loop {
-            for sig in signals.pending() {
-                if sig == signal_hook::SIGINT {
-                    &ctx.stop();
-                    std::process::exit(0);
-                }
-            }
+            poll.poll(&mut events, None).expect("failed to poll");
 
-            match listener.accept() {
-                // TODO spawn a thread, maybe?
-                Ok((mut sock, _addr)) => {
-                    let res = process_sock(&mut sock);
-                    if res == EndResult::Stop {
-                        break;
+            for event in events.iter() {
+                match event.token() {
+                    LISTENER => match listener.accept() {
+                        Ok(Some((sock, _addr))) => {
+                            ctx.handle_socket(sock);
+                        }
+                        _ => {}
+                    },
+
+                    SIGNAL => {
+                        ctx.stop();
                     }
-                }
 
-                Err(_) => (),
+                    _ => unreachable!(),
+                }
             }
         }
     }
