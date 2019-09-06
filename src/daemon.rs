@@ -1,6 +1,5 @@
 use std::io::prelude::*;
 use std::net::Shutdown;
-//use std::os::unix::net::{UnixListener, UnixStream};
 
 use signal_hook;
 use signal_hook::iterator::Signals;
@@ -8,21 +7,25 @@ use signal_hook::iterator::Signals;
 use mio::*;
 use mio_uds::{UnixListener, UnixStream};
 
+/// Get the main directory for runtime files for tsusu.
 pub fn get_tsusu_runtime_dir() -> std::path::PathBuf {
     let exec_dir = dirs::runtime_dir().unwrap();
     std::path::Path::new(&exec_dir).join("tsusu")
 }
 
+/// Get the path for the unix socket used by tsusu
 pub fn get_sockpath() -> std::path::PathBuf {
     let tsu_dir = get_tsusu_runtime_dir();
     std::path::Path::new(&tsu_dir).join("sock")
 }
 
+/// Get the path for the PID file used by tsusu
 pub fn get_pidpath() -> std::path::PathBuf {
     let tsu_dir = get_tsusu_runtime_dir();
     std::path::Path::new(&tsu_dir).join("pid")
 }
 
+/// Write the current PID to the PID file used by tsusu.
 fn write_self_pid(pidpath: &std::path::PathBuf) {
     let pidfile = std::fs::File::create(pidpath).expect("failed to open pid file");
     let mut writer = std::io::BufWriter::new(&pidfile);
@@ -31,6 +34,8 @@ fn write_self_pid(pidpath: &std::path::PathBuf) {
     write!(&mut writer, "{}", pid).expect("failed to write pid file");
 }
 
+/// Helper function to close a given UnixListener.
+/// This deletes the underlying path to the unix socket.
 fn close_unix_listener(listener: &UnixListener) {
     // we should delete the file to make sure connections to it fail
     let addr = listener.local_addr().unwrap();
@@ -58,6 +63,8 @@ impl Context {
         }
     }
 
+    /// Write to the PID file and start a unix domain socket
+    /// listener for the daemon.
     fn start(&mut self) -> std::io::Result<()> {
         write_self_pid(&self.pidpath);
 
@@ -81,7 +88,8 @@ impl Context {
         }
     }
 
-    // Stops the application
+    /// Stop the current listener and destroy the PID file.
+    /// Calls std::process::exit.
     fn stop(&self) {
         if let Some(listener) = &self.listener {
             close_unix_listener(listener);
