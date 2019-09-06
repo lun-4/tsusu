@@ -72,10 +72,13 @@ impl Context {
     }
 
     fn handle_socket(&self, mut sock: UnixStream) {
-        sock.write_all(b"HELO;")
-            .expect("failed to send helo message");
+        if let Err(_) = sock.write_all(b"HELO;") {
+            return;
+        }
 
-        sock.shutdown(Shutdown::Both).expect("sock shutdown failed");
+        if let Err(_) = sock.shutdown(Shutdown::Both) {
+            return;
+        }
     }
 
     // Stops the application
