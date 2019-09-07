@@ -132,6 +132,7 @@ pub fn daemon_main() {
         .expect("failed to register signal handler");
 
     // TODO read some config file and start child processes
+    // ctx.read_from_config("");
 
     if let Some(listener) = &ctx.listener {
         poll.register(

@@ -1,13 +1,16 @@
 mod daemon;
 use daemon::{daemon_main, get_pidpath, get_sockpath};
 
+// TODO how do i use these things
+mod message;
+use message::*;
+
 use nix;
 use nix::unistd::Pid;
 
 use std::io::prelude::*;
 use std::io::BufReader;
 
-//use std::os::unix;
 use std::os::unix::net::UnixStream;
 
 #[derive(Debug)]
