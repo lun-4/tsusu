@@ -1,52 +1,21 @@
 const std = @import("std");
 
-pub fn main(sockpath: [108]u8) anyerror!void {
+pub fn main() anyerror!void {
     std.debug.warn("daemon\n");
-    const sockfd = try std.os.socket(std.os.AF_UNIX, std.os.SOCK_STREAM, 0);
-    defer std.os.close(sockfd);
+    const allocator = std.heap.direct_allocator;
 
-    for (sockpath) |char| {
-        std.debug.warn("{} ", char);
-    }
-    std.debug.warn("\n");
+    var server = std.net.TcpServer.init(std.net.TcpServer.Options{});
+    defer server.deinit();
 
-    var addr = std.os.sockaddr{
-        .un = std.os.sockaddr_un{
-            .family = std.os.AF_UNIX,
-            .path = [_]u8{0} ** 108,
-        },
-    };
+    var addr = try std.net.IpAddress.parse("127.0.0.1", 24696);
+    try server.listen(addr);
 
-    std.mem.copy(u8, &addr.un.path, sockpath);
-
-    // os.bind, accept, and connect, have local hacks.
-
-    try std.os.bind(
-        sockfd,
-        &addr,
-        @intCast(u32, std.mem.len(u8, &sockpath) + 2),
-    );
-
-    var cli_addr = std.os.sockaddr{
-        .un = std.os.sockaddr_un{
-            .family = std.os.AF_UNIX,
-            .path = [_]u8{0} ** 108,
-        },
-    };
-
-    std.debug.warn("bind done! {}\n", sockfd);
+    std.debug.warn("bind done on fd={}\n", server.sockfd);
 
     while (true) {
-        var sockaddr_size = @intCast(u32, std.mem.len(u8, &cli_addr.un.path) + 2);
+        var cli = try server.accept();
+        defer cli.close();
 
-        var clifd = try std.os.accept4(
-            sockfd,
-            &cli_addr,
-            &sockaddr_size,
-            0,
-        );
-        defer std.os.close(clifd);
-        std.debug.warn("client: {}\n", clifd);
+        std.debug.warn("client fd from server: {}\n", cli.handle);
     }
-    std.time.sleep(15 * std.time.second);
 }
