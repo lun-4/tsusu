@@ -2,6 +2,33 @@ const std = @import("std");
 
 const daemon = @import("daemon.zig");
 
+const fs = std.fs;
+const os = std.os;
+const mem = std.mem;
+
+fn connectUnixSocket(path: []const u8) !fs.File {
+    const opt_non_block = if (std.io.mode == .evented) os.SOCK_NONBLOCK else 0;
+    const sockfd = try os.socket(
+        os.AF_UNIX,
+        os.SOCK_STREAM | os.SOCK_CLOEXEC | opt_non_block,
+        0,
+    );
+    errdefer os.close(sockfd);
+
+    var sock_addr = os.sockaddr_un{
+        .family = os.AF_UNIX,
+        .path = undefined,
+    };
+
+    if (path.len > sock_addr.path.len) return error.NameTooLong;
+    mem.copy(u8, &sock_addr.path, path);
+
+    const size = @intCast(u32, @sizeOf(os.sockaddr_un) - sock_addr.path.len + path.len);
+    try os.connect(sockfd, @ptrCast(*os.sockaddr, &sock_addr), size);
+
+    return fs.File.openHandle(sockfd);
+}
+
 pub const Context = struct {
     allocator: *std.mem.Allocator,
     args_it: std.process.ArgIterator,
@@ -18,10 +45,8 @@ pub const Context = struct {
         if (self.tries >= 3) return error.SpawnFail;
         self.tries += 1;
 
-        var addr = try std.net.IpAddress.parse("127.0.0.1", 24696);
-
-        return std.net.tcpConnectToAddress(
-            addr,
+        return connectUnixSocket(
+            "/home/luna/.local/share/tsusu.sock",
         ) catch |err| {
             try spawnDaemon();
 
