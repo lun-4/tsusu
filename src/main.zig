@@ -78,6 +78,8 @@ pub fn main() anyerror!void {
 
     std.debug.warn("sock fd from client connected: {}\n", sock.handle);
 
-    //const mode = args_it.next(allocator);
-    //if (std.mem.eql(u8, mode, "destroy")) {}
+    const mode = try (args_it.next(allocator) orelse @panic("expected mode"));
+    if (std.mem.eql(u8, mode, "destroy")) {
+        std.debug.warn("destroy\n");
+    }
 }
