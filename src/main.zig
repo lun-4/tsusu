@@ -45,6 +45,17 @@ fn spawnDaemon() !void {
         return;
     }
 
+    const daemon_pid = os.linux.getpid();
+    const pidpath = "/home/luna/.local/share/tsusu.pid";
+    var pidfile = try std.fs.File.openWrite(pidpath);
+    var stream = &pidfile.outStream().stream;
+    try stream.print("{}", daemon_pid);
+    pidfile.close();
+
+    defer {
+        std.os.unlink(pidpath) catch |err| {}; // do nothing on errors
+    }
+
     // TODO setsid
     // TODO umask
 
@@ -67,5 +78,6 @@ pub fn main() anyerror!void {
 
     std.debug.warn("sock fd from client connected: {}\n", sock.handle);
 
-    //const mode = try (args_it.next(allocator) orelse "list");
+    //const mode = args_it.next(allocator);
+    //if (std.mem.eql(u8, mode, "destroy")) {}
 }
