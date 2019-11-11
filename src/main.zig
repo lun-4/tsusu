@@ -28,7 +28,7 @@ pub const Context = struct {
             try spawnDaemon();
 
             // assuming spawning doesn't take more than 500ms.
-            std.time.sleep(500 * std.time.millisecond);
+            std.time.sleep(1000 * std.time.millisecond);
             return try self.checkDaemon();
         };
     }

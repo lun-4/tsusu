@@ -58,18 +58,20 @@ pub fn main() anyerror!void {
     //_ = std.os.linux.sigprocmask(std.os.SIG_BLOCK, &mask, null);
     //const signal_fd = @intCast(i32, signalfd(-1, &mask, 0));
 
-    var server_sock = try std.net.bindUnixSocket("/home/luna/.local/share/tsusu.sock");
-    defer server_sock.close();
+    var server = std.net.StreamServer.init(std.net.StreamServer.Options{});
+    defer server.deinit();
 
-    try std.os.listen(server_sock.handle, 128);
+    var addr = try std.net.Address.initUnix("/home/luna/.local/share/tsusu.sock");
 
-    std.debug.warn("bind done on fd={}\n", server_sock.handle);
+    try server.listen(addr);
+
+    std.debug.warn("bind+listen done on fd={}\n", server.sockfd);
 
     var sockets = PollFdList.init(allocator);
     defer sockets.deinit();
 
     try sockets.append(os.pollfd{
-        .fd = server_sock.handle,
+        .fd = server.sockfd.?,
         .events = os.POLLIN,
         .revents = 0,
     });
@@ -97,12 +99,9 @@ pub fn main() anyerror!void {
             if (pollfd.revents == 0) continue;
             if (pollfd.revents != os.POLLIN) return error.UnexpectedSocketRevents;
 
-            if (pollfd.fd == server_sock.handle) {
+            if (pollfd.fd == server.sockfd.?) {
                 while (true) {
-                    var cli = unixAccept(server_sock.handle) catch |err| {
-                        if (err == error.WouldBlock) break;
-                        return err;
-                    };
+                    var cli = try server.accept();
 
                     try sockets.append(os.pollfd{
                         .fd = cli.handle,
