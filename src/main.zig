@@ -132,6 +132,12 @@ pub fn main() anyerror!void {
 
     std.debug.warn("sock fd from client connected: {}\n", sock.handle);
 
+    // get helo
+    var buf = try ctx.allocator.alloc(u8, 1024);
+    const bytes = try sock.read(buf);
+    const msg = buf[0..bytes];
+    std.debug.warn("first msg: '{}'\n", msg);
+
     switch (mode) {
         .List => std.debug.warn("TODO send list"),
         else => std.debug.warn("TODO implement mode {}\n", mode),

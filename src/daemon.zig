@@ -1,6 +1,8 @@
 const std = @import("std");
 const os = std.os;
 
+//pub const io_mode = .evented;
+
 pub fn unixAccept(sockfd: os.fd_t) !std.fs.File {
     const nonblock = if (std.io.is_async) os.SOCK_NONBLOCK else 0;
     const accept_flags = nonblock | os.SOCK_CLOEXEC;
@@ -20,6 +22,7 @@ fn readManyFromClient(allocator: *std.mem.Allocator, pollfd: os.pollfd) !void {
     var buf = try allocator.alloc(u8, 1024);
     while (true) {
         const count = os.read(pollfd.fd, buf) catch |err| {
+            // TODO replace by continue
             if (err == error.WouldBlock) break;
             return err;
         };
@@ -57,6 +60,8 @@ pub fn main() anyerror!void {
     //std.os.linux.sigaddset(&mask, std.os.SIGINT);
     //_ = std.os.linux.sigprocmask(std.os.SIG_BLOCK, &mask, null);
     //const signal_fd = @intCast(i32, signalfd(-1, &mask, 0));
+
+    // TODO use std.c.signalfd?
 
     var server = std.net.StreamServer.init(std.net.StreamServer.Options{});
     defer server.deinit();
@@ -108,6 +113,9 @@ pub fn main() anyerror!void {
                         .events = os.POLLIN,
                         .revents = 0,
                     });
+
+                    // as soon as we get a new client, send helo
+                    try cli.write("HELO\n");
 
                     std.debug.warn("server: got client {}\n", cli.handle);
                 }
