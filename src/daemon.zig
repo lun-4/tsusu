@@ -115,7 +115,7 @@ pub fn main() anyerror!void {
                     });
 
                     // as soon as we get a new client, send helo
-                    try cli.write("HELO\n");
+                    try cli.write("HELO;");
 
                     std.debug.warn("server: got client {}\n", cli.handle);
                 }
