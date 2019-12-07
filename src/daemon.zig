@@ -106,18 +106,19 @@ pub fn main() anyerror!void {
 
             if (pollfd.fd == server.sockfd.?) {
                 while (true) {
-                    var cli = try server.accept();
+                    var conn = try server.accept();
+                    var sock = conn.file;
 
                     try sockets.append(os.pollfd{
-                        .fd = cli.handle,
+                        .fd = sock.handle,
                         .events = os.POLLIN,
                         .revents = 0,
                     });
 
                     // as soon as we get a new client, send helo
-                    try cli.write("HELO;");
+                    try sock.write("HELO;");
 
-                    std.debug.warn("server: got client {}\n", cli.handle);
+                    std.debug.warn("server: got client {}\n", sock.handle);
                 }
                 //} else if (pollfd.fd == signal_fd) {
                 //    std.debug.warn("got sigint");
