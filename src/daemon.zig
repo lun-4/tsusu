@@ -3,21 +3,6 @@ const os = std.os;
 
 //pub const io_mode = .evented;
 
-pub fn unixAccept(sockfd: os.fd_t) !std.fs.File {
-    const nonblock = if (std.io.is_async) os.SOCK_NONBLOCK else 0;
-    const accept_flags = nonblock | os.SOCK_CLOEXEC;
-
-    var accepted_addr: os.sockaddr_un = undefined;
-    var adr_len: os.socklen_t = @sizeOf(std.os.sockaddr_un);
-    var fd = try os.accept4(
-        sockfd,
-        @ptrCast(*os.sockaddr, &accepted_addr),
-        &adr_len,
-        accept_flags,
-    );
-    return std.fs.File.openHandle(fd);
-}
-
 fn readManyFromClient(allocator: *std.mem.Allocator, pollfd: os.pollfd) !void {
     var buf = try allocator.alloc(u8, 1024);
     while (true) {
