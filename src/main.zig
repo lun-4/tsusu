@@ -49,7 +49,7 @@ fn spawnDaemon() !void {
     const pidpath = "/home/luna/.local/share/tsusu.pid";
     var pidfile = try std.fs.File.openWrite(pidpath);
     var stream = &pidfile.outStream().stream;
-    try stream.print("{}", daemon_pid);
+    try stream.print("{}", .{daemon_pid});
     pidfile.close();
 
     defer {
@@ -98,7 +98,7 @@ pub fn main() anyerror!void {
         .Destroy => {
             const pidpath = "/home/luna/.local/share/tsusu.pid";
             var pidfile = std.fs.File.openRead(pidpath) catch |err| {
-                std.debug.warn("Failed to open PID file. is the daemon running?\n");
+                std.debug.warn("Failed to open PID file. is the daemon running?\n", .{});
                 return;
             };
 
@@ -107,7 +107,7 @@ pub fn main() anyerror!void {
             const pid_str = buf[0..count];
 
             var pid_int = std.fmt.parseInt(os.pid_t, pid_str, 10) catch |err| {
-                std.debug.warn("Failed to parse pid '{}': {}\n", pid_str, err);
+                std.debug.warn("Failed to parse pid '{}': {}\n", .{ pid_str, err });
                 return;
             };
 
@@ -120,7 +120,7 @@ pub fn main() anyerror!void {
             const sockpath = "/home/luna/.local/share/tsusu.sock";
             std.os.unlink(sockpath) catch |err| {};
 
-            std.debug.warn("sent SIGINT to pid {}\n", pid_int);
+            std.debug.warn("sent SIGINT to pid {}\n", .{pid_int});
             return;
         },
         else => {},
@@ -130,16 +130,25 @@ pub fn main() anyerror!void {
     const sock = try ctx.checkDaemon();
     defer sock.close();
 
-    std.debug.warn("sock fd from client connected: {}\n", sock.handle);
+    std.debug.warn("[c]sock fd from client connected: {}\n", .{sock.handle});
 
     // get helo
-    var buf = try ctx.allocator.alloc(u8, 1024);
-    const bytes = try sock.read(buf);
-    const msg = buf[0..bytes];
-    std.debug.warn("first msg: '{}'\n", msg);
+    var helo_buf = try ctx.allocator.alloc(u8, 10);
+    const helo_bytes = try sock.read(helo_buf);
+    const helo_msg = helo_buf[0..helo_bytes];
+    std.debug.warn("[c]first msg (should be helo): {} '{}'\n", .{ helo_msg.len, helo_msg });
 
+    var buf = try ctx.allocator.alloc(u8, 1024);
     switch (mode) {
-        .List => std.debug.warn("TODO send list"),
-        else => std.debug.warn("TODO implement mode {}\n", mode),
+        .List => blk: {
+            std.debug.warn("[c]try send\n", .{});
+            try sock.write("list");
+            std.debug.warn("[c]sent\n", .{});
+            const bytes = try sock.read(buf);
+            const msg = buf[0..bytes];
+            std.debug.warn("[c]list res: {} '{}'\n", .{ msg.len, msg });
+        },
+
+        else => std.debug.warn("TODO implement mode {}\n", .{mode}),
     }
 }

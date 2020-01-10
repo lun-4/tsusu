@@ -3,8 +3,27 @@ const os = std.os;
 
 //pub const io_mode = .evented;
 
-fn readManyFromClient(allocator: *std.mem.Allocator, pollfd: os.pollfd) !void {
-    var buf = try allocator.alloc(u8, 1024);
+pub const Service = struct {
+    name: []const u8,
+};
+
+pub const ServiceList = std.ArrayList(Service);
+
+pub const DaemonState = struct {
+    allocator: *std.mem.Allocator,
+    services: ServiceList,
+
+    pub fn init(allocator: *std.mem.Allocator) @This() {
+        return .{ .allocator = allocator, .services = ServiceList.init(allocator) };
+    }
+};
+
+fn readManyFromClient(
+    state: *DaemonState,
+    pollfd: os.pollfd,
+) !void {
+    var buf = try state.allocator.alloc(u8, 1024);
+
     while (true) {
         const count = os.read(pollfd.fd, buf) catch |err| {
             // TODO replace by continue
@@ -17,7 +36,12 @@ fn readManyFromClient(allocator: *std.mem.Allocator, pollfd: os.pollfd) !void {
         }
 
         var message = buf[0..count];
-        std.debug.warn("got msg: {}\n", message);
+        std.debug.warn("[d]got msg: {}\n", .{message});
+
+        if (std.mem.eql(u8, message, "list")) {
+            std.debug.warn("[d]got list: {}", .{state.services});
+            try os.write(pollfd.fd, "awoo");
+        }
     }
 }
 
@@ -36,7 +60,7 @@ fn signalfd(fd: i32, mask: *const std.os.sigset_t, flags: i32) usize {
 }
 
 pub fn main() anyerror!void {
-    std.debug.warn("daemon\n");
+    std.debug.warn("[d]daemon\n", .{});
     const allocator = std.heap.direct_allocator;
 
     // TODO this doesnt work
@@ -55,7 +79,7 @@ pub fn main() anyerror!void {
 
     try server.listen(addr);
 
-    std.debug.warn("bind+listen done on fd={}\n", server.sockfd);
+    std.debug.warn("[d]bind+listen done on fd={}\n", .{server.sockfd});
 
     var sockets = PollFdList.init(allocator);
     defer sockets.deinit();
@@ -72,18 +96,20 @@ pub fn main() anyerror!void {
     //    .revents = 0,
     //});
 
+    var state = DaemonState.init(allocator);
+
     while (true) {
         var pollfds = sockets.toSlice();
-        std.debug.warn("polling {} sockets...\n", pollfds.len);
+        std.debug.warn("[d]polling {} sockets...\n", .{pollfds.len});
         var available = try os.poll(pollfds, -1);
         if (available == 0) {
-            std.debug.warn("timed out, retrying\n");
+            std.debug.warn("[d]timed out, retrying\n", .{});
             continue;
         }
 
         // TODO remove our WouldBlock checks when we have an event loop here
 
-        std.debug.warn("got {} available fds\n", available);
+        std.debug.warn("[d]got {} available fds\n", .{available});
 
         for (pollfds) |pollfd, idx| {
             if (pollfd.revents == 0) continue;
@@ -91,7 +117,11 @@ pub fn main() anyerror!void {
 
             if (pollfd.fd == server.sockfd.?) {
                 while (true) {
-                    var conn = try server.accept();
+                    std.debug.warn("[d]try accept?\n", .{});
+                    var conn = server.accept() catch |e| {
+                        std.debug.warn("[d??]{}\n", .{e});
+                        unreachable;
+                    };
                     var sock = conn.file;
 
                     try sockets.append(os.pollfd{
@@ -102,19 +132,24 @@ pub fn main() anyerror!void {
 
                     // as soon as we get a new client, send helo
                     try sock.write("HELO;");
+                    std.debug.warn("[d]server: got client {}\n", .{sock.handle});
 
-                    std.debug.warn("server: got client {}\n", sock.handle);
+                    // TODO many clients per accept someday
+                    break;
                 }
+                std.debug.warn("[d]end thing\n", .{});
+
                 //} else if (pollfd.fd == signal_fd) {
                 //    std.debug.warn("got sigint");
                 //    return;
             } else {
-                readManyFromClient(allocator, pollfd) catch |err| {
+                readManyFromClient(&state, pollfd) catch |err| {
                     std.os.close(pollfd.fd);
-                    std.debug.warn("closed fd {} from {}\n", pollfd.fd, err);
+                    std.debug.warn("[d]closed fd {} from {}\n", .{ pollfd.fd, err });
                     _ = sockets.orderedRemove(idx);
                 };
             }
+            std.debug.warn("[d]tick tick?\n", .{});
         }
     }
 }
