@@ -6,6 +6,7 @@ const Logger = @import("logger.zig").Logger;
 
 pub const Service = struct {
     path: []const u8,
+    proc: ?*std.ChildProcess = null,
 };
 
 pub const ServiceMap = std.StringHashMap(Service);
@@ -31,7 +32,7 @@ pub const DaemonState = struct {
         var services_it = self.services.iterator();
         while (services_it.next()) |kv| {
             self.logger.info("serv: {} {}", .{ kv.key, kv.value.path });
-            try stream.print("{} {};", .{ kv.key, kv.value.path });
+            try stream.print("{},{};", .{ kv.key, kv.value.path });
         }
         try stream.write("!");
     }
@@ -42,13 +43,14 @@ fn readManyFromClient(
     pollfd: os.pollfd,
 ) !void {
     var logger = state.logger;
+    var allocator = state.allocator;
     var sock = std.fs.File.openHandle(pollfd.fd);
     var in_stream = &sock.inStream().stream;
     var stream = &sock.outStream().stream;
 
     while (true) {
         logger.info("try read client fd {}", .{sock.handle});
-        const message = in_stream.readUntilDelimiterAlloc(state.allocator, '!', 1024) catch |err| {
+        const message = in_stream.readUntilDelimiterAlloc(allocator, '!', 1024) catch |err| {
             // TODO replace by continue?? where loop be
             if (err == error.WouldBlock) break;
             return err;
@@ -71,7 +73,19 @@ fn readManyFromClient(
             logger.info("got service start: {} {}", .{ service_name, service_path });
 
             if (state.services.get(service_name) == null) {
-                _ = try state.services.put(service_name, .{ .path = service_path });
+                logger.info("starting service {} with cmdline {}", .{ service_name, service_path });
+
+                var argv = std.ArrayList([]const u8).init(allocator);
+                errdefer argv.deinit();
+
+                var path_it = std.mem.separate(service_path, " ");
+                while (path_it.next()) |component| {
+                    try argv.append(component);
+                }
+
+                var proc = try std.ChildProcess.init(argv.toSlice(), allocator);
+                try proc.spawn();
+                _ = try state.services.put(service_name, .{ .path = service_path, .proc = proc });
             }
 
             try state.writeServices(stream);
@@ -168,7 +182,7 @@ pub fn main(logger: Logger) anyerror!void {
 
                     // as soon as we get a new client, send helo
                     logger.info("server: got client {}", .{sock.handle});
-                    try sock.write("HELO!");
+                    try sock.write("helo!");
 
                     // TODO many clients per accept someday
                     break;

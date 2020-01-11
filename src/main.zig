@@ -114,6 +114,18 @@ fn getMode(mode_arg: []const u8) !Mode {
     return error.UnknownMode;
 }
 
+pub fn printServices(msg: []const u8) void {
+    std.debug.warn("name | path\n", .{});
+    var it = std.mem.separate(msg, ";");
+    while (it.next()) |service_line| {
+        // lol what
+        if (service_line.len == 0) break;
+
+        var serv_it = std.mem.separate(service_line, ",");
+        std.debug.warn("{} | {}\n", .{ serv_it.next().?, serv_it.next().? });
+    }
+}
+
 pub fn main() anyerror!void {
     // every time we start, we check if we have a daemon running.
     var arena = std.heap.ArenaAllocator.init(std.heap.direct_allocator);
@@ -168,8 +180,13 @@ pub fn main() anyerror!void {
     var in_stream = &sock.inStream().stream;
     var out_stream = &sock.outStream().stream;
 
-    std.debug.warn("[c]sock fd from client connected: {}\n", .{sock.handle});
-    const helo_msg = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 10);
+    std.debug.warn("[c] sock fd to server: {}\n", .{sock.handle});
+
+    const helo_msg = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 6);
+    if (!std.mem.eql(u8, helo_msg, "helo")) {
+        std.debug.warn("invalid helo, expected helo, got {}\n", .{helo_msg});
+        return error.InvalidHello;
+    }
 
     std.debug.warn("[c]first msg (should be helo): {} '{}'\n", .{ helo_msg.len, helo_msg });
 
@@ -177,11 +194,17 @@ pub fn main() anyerror!void {
     switch (mode) {
         .Noop => {},
         .List => blk: {
-            std.debug.warn("[c]try send\n", .{});
             try sock.write("list!");
-            std.debug.warn("[c]sent. waiting read\n", .{});
+
             const msg = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 1024);
-            std.debug.warn("[c]list res: {} '{}'\n", .{ msg.len, msg });
+            defer ctx.allocator.free(msg);
+
+            if (msg.len == 0) {
+                std.debug.warn("<no services>\n", .{});
+                return;
+            }
+
+            printServices(msg);
         },
 
         .Start => blk: {
@@ -190,9 +213,11 @@ pub fn main() anyerror!void {
                 try (ctx.args_it.next(allocator) orelse @panic("expected name")),
                 try (ctx.args_it.next(allocator) orelse @panic("expected path")),
             });
+
             std.debug.warn("[c]sent\n", .{});
             const msg = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 1024);
-            std.debug.warn("[c]send res: {} '{}'\n", .{ msg.len, msg });
+            defer ctx.allocator.free(msg);
+            printServices(msg);
         },
 
         else => std.debug.warn("TODO implement mode {}\n", .{mode}),
