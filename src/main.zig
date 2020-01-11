@@ -7,6 +7,7 @@ const os = std.os;
 const mem = std.mem;
 
 const Logger = @import("logger.zig").Logger;
+const helpers = @import("helpers.zig");
 
 pub const Context = struct {
     allocator: *std.mem.Allocator,
@@ -24,17 +25,64 @@ pub const Context = struct {
         if (self.tries >= 3) return error.SpawnFail;
         self.tries += 1;
 
-        std.debug.warn("trying to connect to socket...\n", .{});
-        return std.net.connectUnixSocket(
-            "/home/luna/.local/share/tsusu.sock",
-        ) catch |err| {
-            std.debug.warn("failed ({}), trying for the {} time...", .{ err, self.tries });
-            try spawnDaemon();
+        const sock_path = try helpers.getPathFor(self.allocator, .Sock);
+
+        std.debug.warn("trying to connect to socket ({})...\n", .{sock_path});
+        return std.net.connectUnixSocket(sock_path) catch |err| {
+            std.debug.warn("failed (error: {}), trying for the {} time...", .{ err, self.tries });
+            try self.spawnDaemon();
 
             // assuming spawning doesn't take more than a second
             std.time.sleep(1000 * std.time.millisecond);
             return try self.checkDaemon();
         };
+    }
+
+    fn spawnDaemon(self: @This()) !void {
+        std.debug.warn("Spawning tsusu daemon...\n", .{});
+        const data_dir = try helpers.fetchDataDir(self.allocator);
+        std.fs.makePath(self.allocator, data_dir) catch |err| {
+            if (err != error.PathAlreadyExists) return err;
+        };
+
+        var pid = try std.os.fork();
+
+        if (pid < 0) {
+            return error.ForkFail;
+        }
+
+        if (pid > 0) {
+            return;
+        }
+
+        const val = umask(0);
+
+        const daemon_pid = os.linux.getpid();
+        const pidpath = try helpers.getPathFor(self.allocator, .Pid);
+        const logpath = try helpers.getPathFor(self.allocator, .Log);
+
+        var pidfile = try std.fs.cwd().createFile(pidpath, .{});
+        var stream = &pidfile.outStream().stream;
+        try stream.print("{}", .{daemon_pid});
+        pidfile.close();
+
+        var logfile = try std.fs.cwd().createFile(logpath, .{
+            .truncate = false,
+        });
+        defer logfile.close();
+        var logstream = &logfile.outStream().stream;
+        var logger = Logger.init(logstream, "[d]");
+
+        defer {
+            std.os.unlink(pidpath) catch |err| {}; // do nothing on errors
+        }
+
+        const sid = try setsid();
+        try std.os.chdir("/");
+        std.os.close(std.os.STDIN_FILENO);
+        std.os.close(std.os.STDOUT_FILENO);
+        std.os.close(std.os.STDERR_FILENO);
+        try daemon.main(logger);
     }
 };
 
@@ -53,48 +101,6 @@ fn setsid() !std.os.pid_t {
         std.os.EPERM => return error.PermissionFail,
         else => |err| return std.os.unexpectedErrno(err),
     }
-}
-
-fn spawnDaemon() !void {
-    std.debug.warn("Spawning tsusu daemon...\n", .{});
-    var pid = try std.os.fork();
-
-    if (pid < 0) {
-        return error.ForkFail;
-    }
-
-    if (pid > 0) {
-        return;
-    }
-
-    const val = umask(0);
-
-    const daemon_pid = os.linux.getpid();
-    const pidpath = "/home/luna/.local/share/tsusu.pid";
-    const logpath = "/home/luna/.local/share/tsusu.log";
-
-    var pidfile = try std.fs.cwd().createFile(pidpath, .{});
-    var stream = &pidfile.outStream().stream;
-    try stream.print("{}", .{daemon_pid});
-    pidfile.close();
-
-    var logfile = try std.fs.cwd().createFile(logpath, .{
-        .truncate = false,
-    });
-    defer logfile.close();
-    var logstream = &logfile.outStream().stream;
-    var logger = Logger.init(logstream, "[d]");
-
-    defer {
-        std.os.unlink(pidpath) catch |err| {}; // do nothing on errors
-    }
-
-    const sid = try setsid();
-    try std.os.chdir("/");
-    std.os.close(std.os.STDIN_FILENO);
-    std.os.close(std.os.STDOUT_FILENO);
-    std.os.close(std.os.STDERR_FILENO);
-    try daemon.main(logger);
 }
 
 pub const Mode = enum {

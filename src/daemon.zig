@@ -2,6 +2,7 @@ const std = @import("std");
 const os = std.os;
 
 const Logger = @import("logger.zig").Logger;
+const helpers = @import("helpers.zig");
 //pub const io_mode = .evented;
 
 pub const Service = struct {
@@ -123,7 +124,7 @@ pub fn main(logger: Logger) anyerror!void {
     var server = std.net.StreamServer.init(std.net.StreamServer.Options{});
     defer server.deinit();
 
-    var addr = try std.net.Address.initUnix("/home/luna/.local/share/tsusu.sock");
+    var addr = try std.net.Address.initUnix(try helpers.getPathFor(allocator, .Sock));
 
     try server.listen(addr);
 
