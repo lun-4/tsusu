@@ -101,9 +101,11 @@ pub const Mode = enum {
     Stop,
     Help,
     List,
+    Noop,
 };
 
 fn getMode(mode_arg: []const u8) !Mode {
+    if (std.mem.eql(u8, mode_arg, "noop")) return .Noop;
     if (std.mem.eql(u8, mode_arg, "destroy")) return .Destroy;
     if (std.mem.eql(u8, mode_arg, "start")) return .Start;
     if (std.mem.eql(u8, mode_arg, "stop")) return .Stop;
@@ -163,23 +165,34 @@ pub fn main() anyerror!void {
     const sock = try ctx.checkDaemon();
     defer sock.close();
 
-    std.debug.warn("[c]sock fd from client connected: {}\n", .{sock.handle});
+    var in_stream = &sock.inStream().stream;
+    var out_stream = &sock.outStream().stream;
 
-    // get helo
-    var helo_buf = try ctx.allocator.alloc(u8, 10);
-    const helo_bytes = try sock.read(helo_buf);
-    const helo_msg = helo_buf[0..helo_bytes];
+    std.debug.warn("[c]sock fd from client connected: {}\n", .{sock.handle});
+    const helo_msg = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 10);
+
     std.debug.warn("[c]first msg (should be helo): {} '{}'\n", .{ helo_msg.len, helo_msg });
 
     var buf = try ctx.allocator.alloc(u8, 1024);
     switch (mode) {
+        .Noop => {},
         .List => blk: {
             std.debug.warn("[c]try send\n", .{});
-            try sock.write("list");
-            std.debug.warn("[c]sent\n", .{});
-            const bytes = try sock.read(buf);
-            const msg = buf[0..bytes];
+            try sock.write("list!");
+            std.debug.warn("[c]sent. waiting read\n", .{});
+            const msg = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 1024);
             std.debug.warn("[c]list res: {} '{}'\n", .{ msg.len, msg });
+        },
+
+        .Start => blk: {
+            std.debug.warn("[c]try send\n", .{});
+            try out_stream.print("start;{};{}!", .{
+                try (ctx.args_it.next(allocator) orelse @panic("expected name")),
+                try (ctx.args_it.next(allocator) orelse @panic("expected path")),
+            });
+            std.debug.warn("[c]sent\n", .{});
+            const msg = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 1024);
+            std.debug.warn("[c]send res: {} '{}'\n", .{ msg.len, msg });
         },
 
         else => std.debug.warn("TODO implement mode {}\n", .{mode}),

@@ -5,22 +5,35 @@ const Logger = @import("logger.zig").Logger;
 //pub const io_mode = .evented;
 
 pub const Service = struct {
-    name: []const u8,
+    path: []const u8,
 };
 
-pub const ServiceList = std.ArrayList(Service);
+pub const ServiceMap = std.StringHashMap(Service);
 
 pub const DaemonState = struct {
     allocator: *std.mem.Allocator,
-    services: ServiceList,
+    services: ServiceMap,
     logger: Logger,
 
     pub fn init(allocator: *std.mem.Allocator, logger: Logger) @This() {
         return .{
             .allocator = allocator,
-            .services = ServiceList.init(allocator),
+            .services = ServiceMap.init(allocator),
             .logger = logger,
         };
+    }
+
+    pub fn deinit() void {
+        self.services.deinit();
+    }
+
+    pub fn writeServices(self: @This(), stream: var) !void {
+        var services_it = self.services.iterator();
+        while (services_it.next()) |kv| {
+            self.logger.info("serv: {} {}", .{ kv.key, kv.value.path });
+            try stream.print("{} {};", .{ kv.key, kv.value.path });
+        }
+        try stream.write("!");
     }
 };
 
@@ -28,26 +41,40 @@ fn readManyFromClient(
     state: *DaemonState,
     pollfd: os.pollfd,
 ) !void {
-    var buf = try state.allocator.alloc(u8, 1024);
     var logger = state.logger;
+    var sock = std.fs.File.openHandle(pollfd.fd);
+    var in_stream = &sock.inStream().stream;
+    var stream = &sock.outStream().stream;
 
     while (true) {
-        const count = os.read(pollfd.fd, buf) catch |err| {
-            // TODO replace by continue
+        logger.info("try read client fd {}", .{sock.handle});
+        const message = in_stream.readUntilDelimiterAlloc(state.allocator, '!', 1024) catch |err| {
+            // TODO replace by continue?? where loop be
             if (err == error.WouldBlock) break;
             return err;
         };
+        logger.info("got msg from fd {}, {} '{}'", .{ sock.handle, message.len, message });
 
-        if (count == 0) {
+        if (message.len == 0) {
             return error.Closed;
         }
 
-        var message = buf[0..count];
-        logger.info("got msg: {}", .{message});
-
         if (std.mem.eql(u8, message, "list")) {
-            logger.info("got list: {}", .{state.services});
-            try os.write(pollfd.fd, "awoo");
+            try state.writeServices(stream);
+        } else if (std.mem.startsWith(u8, message, "start")) {
+            logger.info("got req to start", .{});
+            var parts_it = std.mem.separate(message, ";");
+            _ = parts_it.next();
+
+            const service_name = parts_it.next().?;
+            const service_path = parts_it.next().?;
+            logger.info("got service start: {} {}", .{ service_name, service_path });
+
+            if (state.services.get(service_name) == null) {
+                _ = try state.services.put(service_name, .{ .path = service_path });
+            }
+
+            try state.writeServices(stream);
         }
     }
 }
@@ -108,7 +135,8 @@ pub fn main(logger: Logger) anyerror!void {
     while (true) {
         var pollfds = sockets.toSlice();
         logger.info("polling {} sockets...", .{pollfds.len});
-        var available = try os.poll(pollfds, -1);
+
+        const available = try os.poll(pollfds, -1);
         if (available == 0) {
             logger.info("timed out, retrying", .{});
             continue;
@@ -119,8 +147,9 @@ pub fn main(logger: Logger) anyerror!void {
         logger.info("got {} available fds", .{available});
 
         for (pollfds) |pollfd, idx| {
+            logger.info("check fd {} {}=={}?", .{ pollfd.fd, pollfd.revents, os.POLLIN });
             if (pollfd.revents == 0) continue;
-            if (pollfd.revents != os.POLLIN) return error.UnexpectedSocketRevents;
+            //if (pollfd.revents != os.POLLIN) return error.UnexpectedSocketRevents;
 
             if (pollfd.fd == server.sockfd.?) {
                 while (true) {
@@ -129,8 +158,8 @@ pub fn main(logger: Logger) anyerror!void {
                         logger.info("[d??]{}", .{e});
                         unreachable;
                     };
-                    var sock = conn.file;
 
+                    var sock = conn.file;
                     try sockets.append(os.pollfd{
                         .fd = sock.handle,
                         .events = os.POLLIN,
@@ -138,8 +167,8 @@ pub fn main(logger: Logger) anyerror!void {
                     });
 
                     // as soon as we get a new client, send helo
-                    try sock.write("HELO;");
                     logger.info("server: got client {}", .{sock.handle});
+                    try sock.write("HELO!");
 
                     // TODO many clients per accept someday
                     break;
@@ -150,12 +179,15 @@ pub fn main(logger: Logger) anyerror!void {
                 //    logger.info("got sigint");
                 //    return;
             } else {
+                logger.info("got fd for read! fd={}", .{pollfd.fd});
+
                 readManyFromClient(&state, pollfd) catch |err| {
                     std.os.close(pollfd.fd);
                     logger.info("closed fd {} from {}", .{ pollfd.fd, err });
                     _ = sockets.orderedRemove(idx);
                 };
             }
+
             logger.info("tick tick?", .{});
         }
     }
