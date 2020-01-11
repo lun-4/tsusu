@@ -24,12 +24,14 @@ pub const Context = struct {
         if (self.tries >= 3) return error.SpawnFail;
         self.tries += 1;
 
+        std.debug.warn("trying to connect to socket...\n", .{});
         return std.net.connectUnixSocket(
             "/home/luna/.local/share/tsusu.sock",
         ) catch |err| {
+            std.debug.warn("failed ({}), trying for the {} time...", .{ err, self.tries });
             try spawnDaemon();
 
-            // assuming spawning doesn't take more than 500ms.
+            // assuming spawning doesn't take more than a second
             std.time.sleep(1000 * std.time.millisecond);
             return try self.checkDaemon();
         };
@@ -54,6 +56,7 @@ fn setsid() !std.os.pid_t {
 }
 
 fn spawnDaemon() !void {
+    std.debug.warn("Spawning tsusu daemon...\n", .{});
     var pid = try std.os.fork();
 
     if (pid < 0) {
@@ -65,7 +68,6 @@ fn spawnDaemon() !void {
     }
 
     const val = umask(0);
-    std.debug.warn("[d]new umask: {}\n", .{val});
 
     const daemon_pid = os.linux.getpid();
     const pidpath = "/home/luna/.local/share/tsusu.pid";
