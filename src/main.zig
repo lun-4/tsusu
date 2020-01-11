@@ -6,6 +6,8 @@ const fs = std.fs;
 const os = std.os;
 const mem = std.mem;
 
+const Logger = @import("logger.zig").Logger;
+
 pub const Context = struct {
     allocator: *std.mem.Allocator,
     args_it: std.process.ArgIterator,
@@ -34,6 +36,14 @@ pub const Context = struct {
     }
 };
 
+// TODO upstream mode_t to linux bits x86_64
+const mode_t = u32;
+
+fn umask(mode: mode_t) mode_t {
+    const rc = os.system.syscall1(os.system.SYS_umask, @bitCast(usize, @as(isize, mode)));
+    return @intCast(mode_t, rc);
+}
+
 fn spawnDaemon() !void {
     var pid = try std.os.fork();
 
@@ -45,21 +55,32 @@ fn spawnDaemon() !void {
         return;
     }
 
+    const val = umask(0);
+    std.debug.warn("[d]new umask: {}\n", .{val});
+
     const daemon_pid = os.linux.getpid();
     const pidpath = "/home/luna/.local/share/tsusu.pid";
-    var pidfile = try std.fs.File.openWrite(pidpath);
+    const logpath = "/home/luna/.local/share/tsusu.log";
+
+    var pidfile = try std.fs.cwd().createFile(pidpath, .{});
     var stream = &pidfile.outStream().stream;
     try stream.print("{}", .{daemon_pid});
     pidfile.close();
+
+    var logfile = try std.fs.cwd().createFile(logpath, .{
+        .truncate = false,
+    });
+    defer logfile.close();
+    var logstream = &logfile.outStream().stream;
+    var logger = Logger.init(logstream, "[d]");
 
     defer {
         std.os.unlink(pidpath) catch |err| {}; // do nothing on errors
     }
 
     // TODO setsid
-    // TODO umask
 
-    try daemon.main();
+    try daemon.main(logger);
 }
 
 pub const Mode = enum {
