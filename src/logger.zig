@@ -9,7 +9,8 @@ pub const Logger = struct {
 
     /// Log a message.
     pub fn info(self: @This(), comptime fmt: []const u8, args: var) void {
-        self.stream.print("{} ", .{self.prefix}) catch |err| {};
+        const tstamp = std.time.timestamp();
+        self.stream.print("{} {} ", .{ tstamp, self.prefix }) catch |err| {};
         self.stream.print(fmt, args) catch |err| {
             std.debug.warn("error sending line {} {}: {}\n", .{ fmt, args, err });
         };

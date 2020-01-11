@@ -44,6 +44,15 @@ fn umask(mode: mode_t) mode_t {
     return @intCast(mode_t, rc);
 }
 
+fn setsid() !std.os.pid_t {
+    const rc = os.system.syscall0(os.system.SYS_setsid);
+    switch (std.os.errno(rc)) {
+        0 => return @intCast(std.os.pid_t, rc),
+        std.os.EPERM => return error.PermissionFail,
+        else => |err| return std.os.unexpectedErrno(err),
+    }
+}
+
 fn spawnDaemon() !void {
     var pid = try std.os.fork();
 
@@ -78,8 +87,11 @@ fn spawnDaemon() !void {
         std.os.unlink(pidpath) catch |err| {}; // do nothing on errors
     }
 
-    // TODO setsid
-
+    const sid = try setsid();
+    try std.os.chdir("/");
+    std.os.close(std.os.STDIN_FILENO);
+    std.os.close(std.os.STDOUT_FILENO);
+    std.os.close(std.os.STDERR_FILENO);
     try daemon.main(logger);
 }
 
