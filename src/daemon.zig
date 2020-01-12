@@ -184,6 +184,7 @@ pub fn main(logger: Logger) anyerror!void {
         logger.info("err!", .{});
         return err;
     };
+    defer os.close(signal_fd);
     logger.info("signalfd: {}", .{signal_fd});
 
     var server = std.net.StreamServer.init(std.net.StreamServer.Options{});
@@ -255,6 +256,36 @@ pub fn main(logger: Logger) anyerror!void {
                 }
             } else if (pollfd.fd == signal_fd) {
                 logger.info("got a signal!!!!", .{});
+
+                var buf: [@sizeOf(os.linux.signalfd_siginfo)]u8 align(8) = undefined;
+                _ = os.read(signal_fd, &buf) catch |err| {
+                    logger.info("failed to read from signal fd: {}", .{err});
+                    return;
+                };
+
+                var siginfo = @ptrCast(*os.linux.signalfd_siginfo, @alignCast(
+                    @alignOf(*os.linux.signalfd_siginfo),
+                    &buf,
+                ));
+
+                var sig = siginfo.ssi_signo;
+                if (sig != os.SIGINT or sig != os.SIGTERM) {
+                    logger.info("got signal {}, not INT or TERM, ignoring", .{});
+                    continue;
+                }
+
+                logger.info("got SIGINT or SIGTERM, stopping!", .{});
+
+                const pidpath = try helpers.getPathFor(state.allocator, .Pid);
+                const sockpath = try helpers.getPathFor(state.allocator, .Sock);
+
+                std.os.unlink(pidpath) catch |err| {
+                    logger.info("failed to delete pid file: {}", .{err});
+                };
+                std.os.unlink(sockpath) catch |err| {
+                    logger.info("failed to delete sock file: {}", .{err});
+                };
+
                 return;
             } else {
                 logger.info("got fd for read! fd={}", .{pollfd.fd});

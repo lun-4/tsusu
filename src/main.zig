@@ -153,8 +153,9 @@ pub fn main() anyerror!void {
 
     switch (mode) {
         .Destroy => {
+            // TODO use sock first (send STOP command), THEN, if it fails, TERM
             const pidpath = try helpers.getPathFor(allocator, .Pid);
-            const sockpath = try helpers.getPathFor(allocator, .Sock);
+            //const sockpath = try helpers.getPathFor(allocator, .Sock);
 
             var pidfile = std.fs.File.openRead(pidpath) catch |err| {
                 std.debug.warn("Failed to open PID file ({}). is the daemon running?\n", .{err});
@@ -171,10 +172,6 @@ pub fn main() anyerror!void {
             };
 
             try std.os.kill(pid_int, std.os.SIGINT);
-
-            // TODO make daemon do unlinking upon sigint
-            std.os.unlink(pidpath) catch |err| {};
-            std.os.unlink(sockpath) catch |err| {};
 
             std.debug.warn("sent SIGINT to pid {}\n", .{pid_int});
             return;
