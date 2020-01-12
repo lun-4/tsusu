@@ -96,30 +96,95 @@ fn readManyFromClient(
 
 const PollFdList = std.ArrayList(os.pollfd);
 
-// int signalfd(int fd, const sigset_t *mask, int flags);
-
-fn signalfd(fd: i32, mask: *const std.os.sigset_t, flags: i32) usize {
-    const rc = os.system.syscall3(
-        os.system.SYS_signalfd,
-        @bitCast(usize, isize(fd)),
+// please work
+fn signalfd(fd: os.fd_t, mask: *const os.sigset_t, flags: i32) !os.fd_t {
+    const rc = os.system.syscall4(
+        os.system.SYS_signalfd4,
+        @bitCast(usize, @as(isize, fd)),
         @ptrToInt(mask),
+        @bitCast(usize, @as(usize, os.linux.NSIG / 8)),
         @intCast(usize, flags),
     );
-    return rc;
+
+    switch (std.os.errno(rc)) {
+        0 => return @intCast(std.os.fd_t, rc),
+        os.EBADF => return error.BadFile,
+        os.EINVAL => return error.InvalidValue,
+        // os.EBADF, os.EINVAL => unreachable,
+        os.ENFILE, os.ENOMEM => return error.SystemResources,
+        os.EMFILE => return error.ProcessResources,
+        os.ENODEV => return error.InodeMountFail,
+        else => |err| return std.os.unexpectedErrno(err),
+    }
+}
+
+fn sigprocmask(flags: u32, noalias set: ?*const os.sigset_t, noalias oldset: ?*os.sigset_t) !void {
+    const rc = os.linux.sigprocmask(flags, set, oldset);
+    switch (std.os.errno(rc)) {
+        0 => {},
+        os.EFAULT, os.EINVAL => unreachable,
+        else => |err| return std.os.unexpectedErrno(err),
+    }
+}
+
+fn sigemptyset(set: *std.os.sigset_t) void {
+    for (set) |*val| {
+        val.* = 0;
+    }
+}
+
+//unsigned s = sig-1;
+//if (s >= _NSIG-1 || sig-32U < 3) {
+// errno = EINVAL;
+// return -1;
+//}
+//set->__bits[s/8/sizeof *set->__bits] |= 1UL<<(s&8*sizeof *set->__bits-1);
+//return 0;
+
+pub fn sigaddset(set: *os.sigset_t, sig: u32) void {
+    const s = sig - 1;
+    // shift in musl: s&8*sizeof *set->__bits-1
+    const shift = @intCast(u5, s & (usize.bit_count - 1));
+    const val = @intCast(u32, 1) << shift;
+    (set.*)[@intCast(usize, s) / usize.bit_count] |= val;
 }
 
 pub fn main(logger: Logger) anyerror!void {
     logger.info("main!", .{});
     const allocator = std.heap.direct_allocator;
 
-    // TODO this doesnt work
-    //var mask: std.os.sigset_t = undefined;
-    //std.mem.secureZero(usize, &mask);
-    //std.os.linux.sigaddset(&mask, std.os.SIGINT);
-    //_ = std.os.linux.sigprocmask(std.os.SIG_BLOCK, &mask, null);
-    //const signal_fd = @intCast(i32, signalfd(-1, &mask, 0));
+    var mask: std.os.sigset_t = undefined;
 
-    // TODO use std.c.signalfd?
+    sigemptyset(&mask);
+    logger.info("sigemptyset", .{});
+    for (mask) |val, idx| {
+        logger.info("mask[{}] = {}", .{ idx, val });
+    }
+
+    logger.info("sigaddset term", .{});
+    sigaddset(&mask, std.os.SIGTERM);
+    for (mask) |val, idx| {
+        logger.info("mask[{}] = {}", .{ idx, val });
+    }
+
+    sigaddset(&mask, std.os.SIGINT);
+    logger.info("sigaddset int", .{});
+    for (mask) |val, idx| {
+        logger.info("mask[{}] = {}", .{ idx, val });
+    }
+
+    try sigprocmask(std.os.SIG_BLOCK, &mask, null);
+    mask[20] = 16386;
+    logger.info("sigprocmask", .{});
+    for (mask) |val, idx| {
+        logger.info("mask[{}] = {}", .{ idx, val });
+    }
+
+    const signal_fd = signalfd(-1, &mask, 0) catch |err| {
+        logger.info("err!", .{});
+        return err;
+    };
+    logger.info("signalfd: {}", .{signal_fd});
 
     var server = std.net.StreamServer.init(std.net.StreamServer.Options{});
     defer server.deinit();
@@ -139,11 +204,11 @@ pub fn main(logger: Logger) anyerror!void {
         .revents = 0,
     });
 
-    //try sockets.append(os.pollfd{
-    //    .fd = signal_fd,
-    //    .events = os.POLLIN,
-    //    .revents = 0,
-    //});
+    try sockets.append(os.pollfd{
+        .fd = signal_fd,
+        .events = os.POLLIN,
+        .revents = 0,
+    });
 
     var state = DaemonState.init(allocator, logger);
 
@@ -188,11 +253,9 @@ pub fn main(logger: Logger) anyerror!void {
                     // TODO many clients per accept someday
                     break;
                 }
-                logger.info("end thing", .{});
-
-                //} else if (pollfd.fd == signal_fd) {
-                //    logger.info("got sigint");
-                //    return;
+            } else if (pollfd.fd == signal_fd) {
+                logger.info("got a signal!!!!", .{});
+                return;
             } else {
                 logger.info("got fd for read! fd={}", .{pollfd.fd});
 

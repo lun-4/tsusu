@@ -82,7 +82,9 @@ pub const Context = struct {
         std.os.close(std.os.STDIN_FILENO);
         std.os.close(std.os.STDOUT_FILENO);
         std.os.close(std.os.STDERR_FILENO);
-        try daemon.main(logger);
+        daemon.main(logger) catch |err| {
+            logger.info("had error: {}", .{err});
+        };
     }
 };
 
@@ -151,28 +153,27 @@ pub fn main() anyerror!void {
 
     switch (mode) {
         .Destroy => {
-            const pidpath = "/home/luna/.local/share/tsusu.pid";
+            const pidpath = try helpers.getPathFor(allocator, .Pid);
+            const sockpath = try helpers.getPathFor(allocator, .Sock);
+
             var pidfile = std.fs.File.openRead(pidpath) catch |err| {
-                std.debug.warn("Failed to open PID file. is the daemon running?\n", .{});
+                std.debug.warn("Failed to open PID file ({}). is the daemon running?\n", .{err});
                 return;
             };
+            var stream = &pidfile.inStream().stream;
 
-            var buf: [100]u8 = undefined;
-            const count = try pidfile.read(&buf);
-            const pid_str = buf[0..count];
+            const pid_str = try stream.readAllAlloc(allocator, 20);
+            defer allocator.free(pid_str);
 
-            var pid_int = std.fmt.parseInt(os.pid_t, pid_str, 10) catch |err| {
+            const pid_int = std.fmt.parseInt(os.pid_t, pid_str, 10) catch |err| {
                 std.debug.warn("Failed to parse pid '{}': {}\n", .{ pid_str, err });
                 return;
             };
 
-            // TODO pr back to zig about ESRCH being unknown pid,
-            // and not a race condition
             try std.os.kill(pid_int, std.os.SIGINT);
 
             // TODO make daemon do unlinking upon sigint
             std.os.unlink(pidpath) catch |err| {};
-            const sockpath = "/home/luna/.local/share/tsusu.sock";
             std.os.unlink(sockpath) catch |err| {};
 
             std.debug.warn("sent SIGINT to pid {}\n", .{pid_int});
