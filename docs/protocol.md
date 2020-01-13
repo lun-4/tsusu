@@ -1,5 +1,7 @@
 # tsusu protocol
 
+**TODO. NOTHING in here is actually implemented, just ideas**
+
 the protocol is:
  - used to communicate between the executable `tsusu` and the daemon
  - works via a single unix socket
