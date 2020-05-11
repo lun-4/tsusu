@@ -11,13 +11,14 @@ pub const Service = struct {
 };
 
 pub const ServiceMap = std.StringHashMap(Service);
+pub const FileLogger = Logger(std.fs.File.OutStream);
 
 pub const DaemonState = struct {
     allocator: *std.mem.Allocator,
     services: ServiceMap,
-    logger: Logger,
+    logger: FileLogger,
 
-    pub fn init(allocator: *std.mem.Allocator, logger: Logger) @This() {
+    pub fn init(allocator: *std.mem.Allocator, logger: FileLogger) @This() {
         return .{
             .allocator = allocator,
             .services = ServiceMap.init(allocator),
@@ -35,7 +36,7 @@ pub const DaemonState = struct {
             self.logger.info("serv: {} {}", .{ kv.key, kv.value.path });
             try stream.print("{},{};", .{ kv.key, kv.value.path });
         }
-        try stream.write("!");
+        _ = try stream.write("!");
     }
 };
 
@@ -45,9 +46,9 @@ fn readManyFromClient(
 ) !void {
     var logger = state.logger;
     var allocator = state.allocator;
-    var sock = std.fs.File.openHandle(pollfd.fd);
-    var in_stream = &sock.inStream().stream;
-    var stream = &sock.outStream().stream;
+    var sock = std.fs.File{ .handle = pollfd.fd };
+    var in_stream = sock.inStream();
+    var stream = sock.outStream();
 
     while (true) {
         logger.info("try read client fd {}", .{sock.handle});
@@ -66,7 +67,7 @@ fn readManyFromClient(
             try state.writeServices(stream);
         } else if (std.mem.startsWith(u8, message, "start")) {
             logger.info("got req to start", .{});
-            var parts_it = std.mem.separate(message, ";");
+            var parts_it = std.mem.split(message, ";");
             _ = parts_it.next();
 
             const service_name = parts_it.next().?;
@@ -79,12 +80,12 @@ fn readManyFromClient(
                 var argv = std.ArrayList([]const u8).init(allocator);
                 errdefer argv.deinit();
 
-                var path_it = std.mem.separate(service_path, " ");
+                var path_it = std.mem.split(service_path, " ");
                 while (path_it.next()) |component| {
                     try argv.append(component);
                 }
 
-                var proc = try std.ChildProcess.init(argv.toSlice(), allocator);
+                var proc = try std.ChildProcess.init(argv.items, allocator);
                 try proc.spawn();
                 _ = try state.services.put(service_name, .{ .path = service_path, .proc = proc });
             }
@@ -99,7 +100,7 @@ const PollFdList = std.ArrayList(os.pollfd);
 // please work
 fn signalfd(fd: os.fd_t, mask: *const os.sigset_t, flags: i32) !os.fd_t {
     const rc = os.system.syscall4(
-        os.system.SYS_signalfd4,
+        os.system.SYS.signalfd4,
         @bitCast(usize, @as(isize, fd)),
         @ptrToInt(mask),
         @bitCast(usize, @as(usize, os.linux.NSIG / 8)),
@@ -119,8 +120,8 @@ fn signalfd(fd: os.fd_t, mask: *const os.sigset_t, flags: i32) !os.fd_t {
 }
 
 fn sigprocmask(flags: u32, noalias set: ?*const os.sigset_t, noalias oldset: ?*os.sigset_t) !void {
-    const rc = os.linux.sigprocmask(flags, set, oldset);
-    switch (std.os.errno(rc)) {
+    const rc = os.system.sigprocmask(flags, set, oldset);
+    switch (os.errno(rc)) {
         0 => {},
         os.EFAULT, os.EINVAL => unreachable,
         else => |err| return std.os.unexpectedErrno(err),
@@ -149,9 +150,9 @@ pub fn sigaddset(set: *os.sigset_t, sig: u32) void {
     (set.*)[@intCast(usize, s) / usize.bit_count] |= val;
 }
 
-pub fn main(logger: Logger) anyerror!void {
+pub fn main(logger: FileLogger) anyerror!void {
     logger.info("main!", .{});
-    const allocator = std.heap.direct_allocator;
+    const allocator = std.heap.page_allocator;
 
     var mask: std.os.sigset_t = undefined;
 
@@ -214,7 +215,7 @@ pub fn main(logger: Logger) anyerror!void {
     var state = DaemonState.init(allocator, logger);
 
     while (true) {
-        var pollfds = sockets.toSlice();
+        var pollfds = sockets.items;
         logger.info("polling {} sockets...", .{pollfds.len});
 
         const available = try os.poll(pollfds, -1);
@@ -249,7 +250,7 @@ pub fn main(logger: Logger) anyerror!void {
 
                     // as soon as we get a new client, send helo
                     logger.info("server: got client {}", .{sock.handle});
-                    try sock.write("helo!");
+                    _ = try sock.write("helo!");
 
                     // TODO many clients per accept someday
                     break;
@@ -270,7 +271,7 @@ pub fn main(logger: Logger) anyerror!void {
 
                 var sig = siginfo.ssi_signo;
                 if (sig != os.SIGINT or sig != os.SIGTERM) {
-                    logger.info("got signal {}, not INT or TERM, ignoring", .{});
+                    logger.info("got signal {}, not INT or TERM, ignoring", .{sig});
                     continue;
                 }
 

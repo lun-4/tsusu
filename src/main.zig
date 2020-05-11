@@ -41,7 +41,7 @@ pub const Context = struct {
     fn spawnDaemon(self: @This()) !void {
         std.debug.warn("Spawning tsusu daemon...\n", .{});
         const data_dir = try helpers.fetchDataDir(self.allocator);
-        std.fs.makePath(self.allocator, data_dir) catch |err| {
+        std.fs.cwd().makePath(data_dir) catch |err| {
             if (err != error.PathAlreadyExists) return err;
         };
 
@@ -62,7 +62,7 @@ pub const Context = struct {
         const logpath = try helpers.getPathFor(self.allocator, .Log);
 
         var pidfile = try std.fs.cwd().createFile(pidpath, .{});
-        var stream = &pidfile.outStream().stream;
+        var stream = pidfile.outStream();
         try stream.print("{}", .{daemon_pid});
         pidfile.close();
 
@@ -70,8 +70,8 @@ pub const Context = struct {
             .truncate = false,
         });
         defer logfile.close();
-        var logstream = &logfile.outStream().stream;
-        var logger = Logger.init(logstream, "[d]");
+        var logstream = logfile.outStream();
+        var logger = Logger(std.fs.File.OutStream).init(logstream, "[d]");
 
         defer {
             std.os.unlink(pidpath) catch |err| {}; // do nothing on errors
@@ -92,12 +92,12 @@ pub const Context = struct {
 const mode_t = u32;
 
 fn umask(mode: mode_t) mode_t {
-    const rc = os.system.syscall1(os.system.SYS_umask, @bitCast(usize, @as(isize, mode)));
+    const rc = os.system.syscall1(os.system.SYS.umask, @bitCast(usize, @as(isize, mode)));
     return @intCast(mode_t, rc);
 }
 
 fn setsid() !std.os.pid_t {
-    const rc = os.system.syscall0(os.system.SYS_setsid);
+    const rc = os.system.syscall0(os.system.SYS.setsid);
     switch (std.os.errno(rc)) {
         0 => return @intCast(std.os.pid_t, rc),
         std.os.EPERM => return error.PermissionFail,
@@ -126,19 +126,19 @@ fn getMode(mode_arg: []const u8) !Mode {
 
 pub fn printServices(msg: []const u8) void {
     std.debug.warn("name | path\n", .{});
-    var it = std.mem.separate(msg, ";");
+    var it = std.mem.split(msg, ";");
     while (it.next()) |service_line| {
         // lol what
         if (service_line.len == 0) break;
 
-        var serv_it = std.mem.separate(service_line, ",");
+        var serv_it = std.mem.split(service_line, ",");
         std.debug.warn("{} | {}\n", .{ serv_it.next().?, serv_it.next().? });
     }
 }
 
 pub fn main() anyerror!void {
     // every time we start, we check if we have a daemon running.
-    var arena = std.heap.ArenaAllocator.init(std.heap.direct_allocator);
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
     const allocator = &arena.allocator;
@@ -157,11 +157,11 @@ pub fn main() anyerror!void {
             const pidpath = try helpers.getPathFor(allocator, .Pid);
             //const sockpath = try helpers.getPathFor(allocator, .Sock);
 
-            var pidfile = std.fs.File.openRead(pidpath) catch |err| {
+            var pidfile = std.fs.cwd().openFile(pidpath, .{}) catch |err| {
                 std.debug.warn("Failed to open PID file ({}). is the daemon running?\n", .{err});
                 return;
             };
-            var stream = &pidfile.inStream().stream;
+            var stream = pidfile.inStream();
 
             const pid_str = try stream.readAllAlloc(allocator, 20);
             defer allocator.free(pid_str);
@@ -183,8 +183,8 @@ pub fn main() anyerror!void {
     const sock = try ctx.checkDaemon();
     defer sock.close();
 
-    var in_stream = &sock.inStream().stream;
-    var out_stream = &sock.outStream().stream;
+    var in_stream = sock.inStream();
+    var out_stream = sock.outStream();
 
     std.debug.warn("[c] sock fd to server: {}\n", .{sock.handle});
 
@@ -200,7 +200,7 @@ pub fn main() anyerror!void {
     switch (mode) {
         .Noop => {},
         .List => blk: {
-            try sock.write("list!");
+            _ = try sock.write("list!");
 
             const msg = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 1024);
             defer ctx.allocator.free(msg);
