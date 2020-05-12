@@ -97,15 +97,6 @@ fn readManyFromClient(
 
 const PollFdList = std.ArrayList(os.pollfd);
 
-// please work
-// fn sigprocmask(flags: u32, noalias set: ?*const os.sigset_t, noalias oldset: ?*os.sigset_t) !void {
-//     const rc = os.system.sigprocmask(flags, set, oldset);
-//     switch (os.errno(rc)) {
-//         0 => {},
-//         os.EFAULT, os.EINVAL => unreachable,
-//         else => |err| return std.os.unexpectedErrno(err),
-//     }
-// }
 fn sigemptyset(set: *std.os.sigset_t) void {
     for (set) |*val| {
         val.* = 0;
