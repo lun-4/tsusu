@@ -98,27 +98,6 @@ fn readManyFromClient(
 const PollFdList = std.ArrayList(os.pollfd);
 
 // please work
-fn signalfd(fd: os.fd_t, mask: *const os.sigset_t, flags: i32) !os.fd_t {
-    const rc = os.system.syscall4(
-        os.system.SYS.signalfd4,
-        @bitCast(usize, @as(isize, fd)),
-        @ptrToInt(mask),
-        @bitCast(usize, @as(usize, os.linux.NSIG / 8)),
-        @intCast(usize, flags),
-    );
-
-    switch (std.os.errno(rc)) {
-        0 => return @intCast(std.os.fd_t, rc),
-        os.EBADF => return error.BadFile,
-        os.EINVAL => return error.InvalidValue,
-        // os.EBADF, os.EINVAL => unreachable,
-        os.ENFILE, os.ENOMEM => return error.SystemResources,
-        os.EMFILE => return error.ProcessResources,
-        os.ENODEV => return error.InodeMountFail,
-        else => |err| return std.os.unexpectedErrno(err),
-    }
-}
-
 // fn sigprocmask(flags: u32, noalias set: ?*const os.sigset_t, noalias oldset: ?*os.sigset_t) !void {
 //     const rc = os.system.sigprocmask(flags, set, oldset);
 //     switch (os.errno(rc)) {
@@ -164,7 +143,7 @@ pub fn main(logger: FileLogger) anyerror!void {
         logger.info("mask[{}] = {}", .{ idx, val });
     }
 
-    const signal_fd = signalfd(-1, &mask, 0) catch |err| {
+    const signal_fd = os.signalfd(-1, &mask, 0) catch |err| {
         logger.info("err!", .{});
         return err;
     };
