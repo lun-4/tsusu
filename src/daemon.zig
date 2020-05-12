@@ -119,35 +119,18 @@ fn signalfd(fd: os.fd_t, mask: *const os.sigset_t, flags: i32) !os.fd_t {
     }
 }
 
-fn sigprocmask(flags: u32, noalias set: ?*const os.sigset_t, noalias oldset: ?*os.sigset_t) !void {
-    const rc = os.system.sigprocmask(flags, set, oldset);
-    switch (os.errno(rc)) {
-        0 => {},
-        os.EFAULT, os.EINVAL => unreachable,
-        else => |err| return std.os.unexpectedErrno(err),
-    }
-}
-
+// fn sigprocmask(flags: u32, noalias set: ?*const os.sigset_t, noalias oldset: ?*os.sigset_t) !void {
+//     const rc = os.system.sigprocmask(flags, set, oldset);
+//     switch (os.errno(rc)) {
+//         0 => {},
+//         os.EFAULT, os.EINVAL => unreachable,
+//         else => |err| return std.os.unexpectedErrno(err),
+//     }
+// }
 fn sigemptyset(set: *std.os.sigset_t) void {
     for (set) |*val| {
         val.* = 0;
     }
-}
-
-//unsigned s = sig-1;
-//if (s >= _NSIG-1 || sig-32U < 3) {
-// errno = EINVAL;
-// return -1;
-//}
-//set->__bits[s/8/sizeof *set->__bits] |= 1UL<<(s&8*sizeof *set->__bits-1);
-//return 0;
-
-pub fn sigaddset(set: *os.sigset_t, sig: u32) void {
-    const s = sig - 1;
-    // shift in musl: s&8*sizeof *set->__bits-1
-    const shift = @intCast(u5, s & (usize.bit_count - 1));
-    const val = @intCast(u32, 1) << shift;
-    (set.*)[@intCast(usize, s) / usize.bit_count] |= val;
 }
 
 pub fn main(logger: FileLogger) anyerror!void {
@@ -163,19 +146,19 @@ pub fn main(logger: FileLogger) anyerror!void {
     }
 
     logger.info("sigaddset term", .{});
-    sigaddset(&mask, std.os.SIGTERM);
+    os.linux.sigaddset(&mask, std.os.SIGTERM);
     for (mask) |val, idx| {
         logger.info("mask[{}] = {}", .{ idx, val });
     }
 
-    sigaddset(&mask, std.os.SIGINT);
+    os.linux.sigaddset(&mask, std.os.SIGINT);
     logger.info("sigaddset int", .{});
     for (mask) |val, idx| {
         logger.info("mask[{}] = {}", .{ idx, val });
     }
 
-    try sigprocmask(std.os.SIG_BLOCK, &mask, null);
-    mask[20] = 16386;
+    _ = os.linux.sigprocmask(std.os.SIG_BLOCK, &mask, null);
+    // mask[20] = 16386;
     logger.info("sigprocmask", .{});
     for (mask) |val, idx| {
         logger.info("mask[{}] = {}", .{ idx, val });
@@ -271,7 +254,11 @@ pub fn main(logger: FileLogger) anyerror!void {
 
                 var sig = siginfo.ssi_signo;
                 if (sig != os.SIGINT or sig != os.SIGTERM) {
-                    logger.info("got signal {}, not INT or TERM, ignoring", .{sig});
+                    logger.info("got signal {}, not INT ({}) or TERM ({}), ignoring", .{
+                        sig,
+                        os.SIGINT,
+                        os.SIGTERM,
+                    });
                     continue;
                 }
 
