@@ -232,7 +232,7 @@ pub fn main(logger: FileLogger) anyerror!void {
                 ));
 
                 var sig = siginfo.ssi_signo;
-                if (sig != os.SIGINT or sig != os.SIGTERM) {
+                if (sig != os.SIGINT and sig != os.SIGTERM) {
                     logger.info("got signal {}, not INT ({}) or TERM ({}), ignoring", .{
                         sig,
                         os.SIGINT,
