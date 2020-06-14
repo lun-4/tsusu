@@ -61,7 +61,9 @@ pub const Context = struct {
         const pidpath = try helpers.getPathFor(self.allocator, .Pid);
         const logpath = try helpers.getPathFor(self.allocator, .Log);
 
-        var pidfile = try std.fs.cwd().createFile(pidpath, .{});
+        var pidfile = try std.fs.cwd().createFile(pidpath, .{ .truncate = false });
+        try pidfile.seekFromEnd(0);
+
         var stream = pidfile.outStream();
         try stream.print("{}", .{daemon_pid});
         pidfile.close();
