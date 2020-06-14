@@ -7,27 +7,46 @@ const helpers = @import("helpers.zig");
 
 pub const Service = struct {
     path: []const u8,
-    proc: ?*std.ChildProcess = null,
+    supervisor: ?*std.Thread = null,
 };
+
+// 250 messages at any given time
+const MAX_MAILBOX_SIZE = 250;
 
 pub const ServiceMap = std.StringHashMap(Service);
 pub const FileLogger = Logger(std.fs.File.OutStream);
+
+pub const Message = struct {};
+pub const Mailbox = std.ArrayList(Message);
+
+pub const ServiceDecl = struct {
+    name: []const u8,
+    cmdline: []const u8,
+};
 
 pub const DaemonState = struct {
     allocator: *std.mem.Allocator,
     services: ServiceMap,
     logger: FileLogger,
 
+    mailbox: Mailbox,
+
     pub fn init(allocator: *std.mem.Allocator, logger: FileLogger) @This() {
         return .{
             .allocator = allocator,
             .services = ServiceMap.init(allocator),
             .logger = logger,
+            .mailbox = Mailbox.init(allocator),
         };
     }
 
     pub fn deinit() void {
         self.services.deinit();
+    }
+
+    pub fn pushMessage(self: *@This(), message: *Message) !void {
+        if (self.mailbox.items.len > MAX_MAILBOX_SIZE) return error.FullMailbox;
+        try self.mailbox.append(message);
     }
 
     pub fn writeServices(self: @This(), stream: var) !void {
@@ -38,7 +57,36 @@ pub const DaemonState = struct {
         }
         _ = try stream.write("!");
     }
+
+    pub fn addSupervisor(self: *@This(), service: ServiceDecl, thread: *std.Thread) !void {
+        _ = try self.services.put(
+            service.name,
+            .{ .path = service.cmdline, .supervisor = thread },
+        );
+    }
 };
+
+pub const SupervisorContext = struct {
+    state: *DaemonState,
+    service: *ServiceDecl,
+};
+
+fn superviseProcess(ctx: SupervisorContext) !void {
+    ctx.state.logger.info("supervise!!!!!\n", .{});
+    //std.debug.warn("state ptr:{}\n", .{ctx.state});
+    //std.debug.warn("service ptr:{}\n", .{ctx.service});
+
+    //        var argv = std.ArrayList([]const u8).init(allocator);
+    //        errdefer argv.deinit();
+
+    //        var path_it = std.mem.split(service_cmdline, " ");
+    //        while (path_it.next()) |component| {
+    //            try argv.append(component);
+    //        }
+
+    //        var proc = try std.ChildProcess.init(argv.items, allocator);
+    //        try proc.spawn();
+}
 
 fn readManyFromClient(
     state: *DaemonState,
@@ -50,48 +98,45 @@ fn readManyFromClient(
     var in_stream = sock.inStream();
     var stream = sock.outStream();
 
-    while (true) {
-        logger.info("try read client fd {}", .{sock.handle});
-        const message = in_stream.readUntilDelimiterAlloc(allocator, '!', 1024) catch |err| {
-            // TODO replace by continue?? where loop be
-            if (err == error.WouldBlock) break;
-            return err;
-        };
-        logger.info("got msg from fd {}, {} '{}'", .{ sock.handle, message.len, message });
+    logger.info("try read client fd {}", .{sock.handle});
+    const message = try in_stream.readUntilDelimiterAlloc(allocator, '!', 1024);
 
-        if (message.len == 0) {
-            return error.Closed;
+    logger.info("got msg from fd {}, {} '{}'", .{ sock.handle, message.len, message });
+
+    if (message.len == 0) {
+        return error.Closed;
+    }
+
+    if (std.mem.eql(u8, message, "list")) {
+        try state.writeServices(stream);
+    } else if (std.mem.startsWith(u8, message, "start")) {
+        var parts_it = std.mem.split(message, ";");
+        _ = parts_it.next();
+
+        // TODO: error handling on malformed messages
+        const service_name = parts_it.next().?;
+        const service_cmdline = parts_it.next().?;
+        logger.info("got service start: {} {}", .{ service_name, service_cmdline });
+
+        var service = try allocator.create(ServiceDecl);
+        service.* =
+            ServiceDecl{ .name = service_name, .cmdline = service_cmdline };
+
+        if (state.services.get(service_name) != null) {
+            _ = try stream.write("err exists!");
+            return;
         }
 
-        if (std.mem.eql(u8, message, "list")) {
-            try state.writeServices(stream);
-        } else if (std.mem.startsWith(u8, message, "start")) {
-            logger.info("got req to start", .{});
-            var parts_it = std.mem.split(message, ";");
-            _ = parts_it.next();
+        logger.info("starting service {} with cmdline {}", .{ service_name, service_cmdline });
 
-            const service_name = parts_it.next().?;
-            const service_path = parts_it.next().?;
-            logger.info("got service start: {} {}", .{ service_name, service_path });
-
-            if (state.services.get(service_name) == null) {
-                logger.info("starting service {} with cmdline {}", .{ service_name, service_path });
-
-                var argv = std.ArrayList([]const u8).init(allocator);
-                errdefer argv.deinit();
-
-                var path_it = std.mem.split(service_path, " ");
-                while (path_it.next()) |component| {
-                    try argv.append(component);
-                }
-
-                var proc = try std.ChildProcess.init(argv.items, allocator);
-                try proc.spawn();
-                _ = try state.services.put(service_name, .{ .path = service_path, .proc = proc });
-            }
-
-            try state.writeServices(stream);
-        }
+        // the supervisor thread actually waits on the process in a loop
+        // so that we can do things like exponential backoff, etc.
+        const supervisor_thread = try std.Thread.spawn(
+            SupervisorContext{ .state = state, .service = service },
+            superviseProcess,
+        );
+        try state.addSupervisor(service.*, supervisor_thread);
+        try state.writeServices(stream);
     }
 }
 
@@ -179,16 +224,12 @@ pub fn main(logger: FileLogger) anyerror!void {
 
         // TODO remove our WouldBlock checks when we have an event loop here
 
-        logger.info("got {} available fds", .{available});
-
         for (pollfds) |pollfd, idx| {
-            logger.info("check fd {} {}=={}?", .{ pollfd.fd, pollfd.revents, os.POLLIN });
             if (pollfd.revents == 0) continue;
             //if (pollfd.revents != os.POLLIN) return error.UnexpectedSocketRevents;
 
             if (pollfd.fd == server.sockfd.?) {
                 while (true) {
-                    logger.info("try accept?", .{});
                     var conn = server.accept() catch |e| {
                         logger.info("[d??]{}", .{e});
                         unreachable;
@@ -202,15 +243,12 @@ pub fn main(logger: FileLogger) anyerror!void {
                     });
 
                     // as soon as we get a new client, send helo
-                    logger.info("server: got client {}", .{sock.handle});
                     _ = try sock.write("helo!");
 
                     // TODO many clients per accept someday
                     break;
                 }
             } else if (pollfd.fd == signal_fd) {
-                logger.info("got a signal!!!!", .{});
-
                 var buf: [@sizeOf(os.linux.signalfd_siginfo)]u8 align(8) = undefined;
                 _ = os.read(signal_fd, &buf) catch |err| {
                     logger.info("failed to read from signal fd: {}", .{err});
