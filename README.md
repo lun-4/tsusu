@@ -6,7 +6,7 @@ planned to superseed my use of [pm2](pm2.io)
 
 ## installing
 
- - zig + a little bit of signalfd support (https://github.com/lun-4/zig/tree/signalfd, i promise i'll PR those back)
+ - zig + a little bit of signalfd support (https://github.com/lun-4/zig/tree/signalfd, waiting on https://github.com/ziglang/zig/pull/5322 to be merged)
 
 ```
 zig build
