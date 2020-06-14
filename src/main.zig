@@ -33,7 +33,7 @@ pub const Context = struct {
             try self.spawnDaemon();
 
             // assuming spawning doesn't take more than a second
-            std.time.sleep(1000 * std.time.millisecond);
+            std.time.sleep(1 * std.time.ns_per_s);
             return try self.checkDaemon();
         };
     }
