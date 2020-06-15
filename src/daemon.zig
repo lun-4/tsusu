@@ -3,7 +3,11 @@ const os = std.os;
 
 const Logger = @import("logger.zig").Logger;
 const helpers = @import("helpers.zig");
-//pub const io_mode = .evented;
+
+const supervisors = @import("supervisor.zig");
+
+const superviseProcess = supervisors.superviseProcess;
+const SupervisorContext = supervisors.SupervisorContext;
 
 pub const Service = struct {
     path: []const u8,
@@ -66,31 +70,6 @@ pub const DaemonState = struct {
     }
 };
 
-pub const SupervisorContext = struct {
-    state: *DaemonState,
-    service: *ServiceDecl,
-};
-
-fn superviseProcess(ctx: SupervisorContext) !void {
-    var state = ctx.state;
-    var allocator = state.allocator;
-
-    state.logger.info("supervisor start\n", .{});
-
-    var argv = std.ArrayList([]const u8).init(allocator);
-    errdefer argv.deinit();
-
-    var path_it = std.mem.split(ctx.service.cmdline, " ");
-    while (path_it.next()) |component| {
-        try argv.append(component);
-    }
-
-    state.logger.info("sup:{}: arg0 = {}\n", .{ ctx.service.name, argv.items[0] });
-
-    var proc = try std.ChildProcess.init(argv.items, allocator);
-    try proc.spawn();
-}
-
 fn readManyFromClient(
     state: *DaemonState,
     pollfd: os.pollfd,
@@ -101,7 +80,6 @@ fn readManyFromClient(
     var in_stream = sock.inStream();
     var stream = sock.outStream();
 
-    logger.info("try read client fd {}", .{sock.handle});
     const message = try in_stream.readUntilDelimiterAlloc(allocator, '!', 1024);
 
     logger.info("got msg from fd {}, {} '{}'", .{ sock.handle, message.len, message });
