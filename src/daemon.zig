@@ -25,10 +25,11 @@ pub const MessageOP = enum(u8) {
     ServiceExited,
 };
 
-pub const Message = union(enum) {
+pub const Message = union(MessageOP) {
     ServiceStarted: struct { name: []const u8 },
-    ServiceExited: struct { name: []const u8, term: std.ChildProcess.Term },
+    ServiceExited: struct { name: []const u8, exit_code: u32 },
 };
+
 pub const Mailbox = std.ArrayList(Message);
 
 pub const ServiceDecl = struct {
@@ -39,6 +40,13 @@ pub const ServiceDecl = struct {
 const BufferType = std.io.FixedBufferStream([]const u8);
 
 const FileInStream = std.io.InStream(std.fs.File, std.os.ReadError, std.fs.File.read);
+const FileOutStream = std.io.OutStream(std.fs.File, std.os.WriteError, std.fs.File.write);
+
+pub const MsgSerializer = std.io.Serializer(
+    .Little,
+    .Byte,
+    FileOutStream,
+);
 
 pub const MsgDeserializer = std.io.Deserializer(
     .Little,
@@ -68,6 +76,13 @@ fn deserializeString(allocator: *std.mem.Allocator, deserializer: var) ![]u8 {
     return try deserializeSlice(allocator, deserializer, u8, string_length);
 }
 
+fn serializeString(serializer: var, string: []const u8) !void {
+    try serializer.serialize(string.len);
+    for (string) |byte| {
+        try serializer.serialize(byte);
+    }
+}
+
 pub const DaemonState = struct {
     allocator: *std.mem.Allocator,
     services: ServiceMap,
@@ -91,8 +106,23 @@ pub const DaemonState = struct {
     }
 
     pub fn pushMessage(self: *@This(), message: Message) !void {
-        if (self.mailbox.items.len > MAX_MAILBOX_SIZE) return error.FullMailbox;
-        try self.mailbox.append(message);
+        var file = std.fs.File{ .handle = self.status_pipe[1] };
+        var stream = file.outStream();
+        var serializer = MsgSerializer.init(stream);
+
+        const opcode = @enumToInt(@as(MessageOP, message));
+        try serializer.serialize(opcode);
+        switch (message) {
+            .ServiceStarted => |data| {
+                try serializeString(&serializer, data.name);
+            },
+            .ServiceExited => |data| {
+                try serializeString(&serializer, data.name);
+                try serializer.serialize(data.exit_code);
+            },
+        }
+
+        self.logger.info("sup sent msg op={}", .{opcode});
     }
 
     pub fn writeServices(self: @This(), stream: var) !void {
@@ -122,7 +152,7 @@ pub const DaemonState = struct {
             .ServiceStarted => {
                 const service_name = try deserializeString(self.allocator, &deserializer);
                 defer self.allocator.free(service_name);
-                self.logger.info("serivce {} started\n", .{service_name});
+                self.logger.info("serivce {x} started", .{service_name});
             },
 
             .ServiceExited => {
@@ -130,7 +160,7 @@ pub const DaemonState = struct {
                 defer self.allocator.free(service_name);
 
                 const exit_code = try deserializer.deserialize(u32);
-                self.logger.info("serivce {} exited with status {}\n", .{ service_name, exit_code });
+                self.logger.info("serivce {x} exited with status {}", .{ service_name, exit_code });
             },
         }
     }
@@ -153,9 +183,12 @@ pub const DaemonState = struct {
             }
 
             for (sockets.items) |pollfd, idx| {
+                if (pollfd.revents == 0) continue;
                 if (pollfd.fd == self.status_pipe[0]) {
                     // got status data to read
-                    try self.readStatusMessage();
+                    self.readStatusMessage() catch |err| {
+                        self.logger.info("Failed to read status message: {}", .{err});
+                    };
                 }
             }
         }
@@ -347,8 +380,6 @@ pub fn main(logger: *FileLogger) anyerror!void {
                     _ = sockets.orderedRemove(idx);
                 };
             }
-
-            logger.info("tick tick?", .{});
         }
     }
 }

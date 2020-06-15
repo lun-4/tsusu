@@ -27,16 +27,25 @@ pub fn superviseProcess(ctx: SupervisorContext) !void {
 
     while (true) {
         var proc = try std.ChildProcess.init(argv.items, allocator);
-        //state.pushMessage(.{
-        //    .ServiceStarted = .{ .name = ctx.service.name },
-        //});
+        state.pushMessage(.{
+            .ServiceStarted = .{ .name = ctx.service.name },
+        }) catch |err| {
+            state.logger.info("Failed to send started message to daemon.", .{});
+        };
 
         const term_result = try proc.spawnAndWait();
 
-        //state.pushMessage(.{
-        //    .ServiceExited = .{ .name = ctx.service.name, .term = term_result },
-        //});
+        switch (term_result) {
+            .Exited, .Signal, .Stopped, .Unknown => |exit_code| {
+                state.pushMessage(.{
+                    .ServiceExited = .{ .name = ctx.service.name, .exit_code = exit_code },
+                }) catch |err| {
+                    state.logger.info("Failed to send exited message to daemon.", .{});
+                };
+            },
+            else => unreachable,
+        }
 
-        std.time.sleep(5 * std.time.s_per_ns);
+        std.time.sleep(5 * std.time.ns_per_s);
     }
 }
