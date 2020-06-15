@@ -72,20 +72,23 @@ pub const SupervisorContext = struct {
 };
 
 fn superviseProcess(ctx: SupervisorContext) !void {
-    ctx.state.logger.info("supervise!!!!!\n", .{});
-    //std.debug.warn("state ptr:{}\n", .{ctx.state});
-    //std.debug.warn("service ptr:{}\n", .{ctx.service});
+    var state = ctx.state;
+    var allocator = state.allocator;
 
-    //        var argv = std.ArrayList([]const u8).init(allocator);
-    //        errdefer argv.deinit();
+    state.logger.info("supervisor start\n", .{});
 
-    //        var path_it = std.mem.split(service_cmdline, " ");
-    //        while (path_it.next()) |component| {
-    //            try argv.append(component);
-    //        }
+    var argv = std.ArrayList([]const u8).init(allocator);
+    errdefer argv.deinit();
 
-    //        var proc = try std.ChildProcess.init(argv.items, allocator);
-    //        try proc.spawn();
+    var path_it = std.mem.split(ctx.service.cmdline, " ");
+    while (path_it.next()) |component| {
+        try argv.append(component);
+    }
+
+    state.logger.info("sup:{}: arg0 = {}\n", .{ ctx.service.name, argv.items[0] });
+
+    var proc = try std.ChildProcess.init(argv.items, allocator);
+    try proc.spawn();
 }
 
 fn readManyFromClient(
