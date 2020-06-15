@@ -4,13 +4,21 @@ pub fn Logger(OutStream: var) type {
     return struct {
         stream: OutStream,
         prefix: []const u8,
+        lock: std.Mutex,
 
         pub fn init(stream: var, prefix: []const u8) @This() {
-            return .{ .stream = stream, .prefix = prefix };
+            return .{ .stream = stream, .prefix = prefix, .lock = std.Mutex.init() };
+        }
+
+        pub fn deinit(self: *@This()) void {
+            self.lock.deinit();
         }
 
         /// Log a message.
-        pub fn info(self: @This(), comptime fmt: []const u8, args: var) void {
+        pub fn info(self: *@This(), comptime fmt: []const u8, args: var) void {
+            const held = self.lock.acquire();
+            defer held.release();
+
             const tstamp = std.time.timestamp();
             self.stream.print("{} {} ", .{ tstamp, self.prefix }) catch |err| {};
             self.stream.print(fmt, args) catch |err| {
