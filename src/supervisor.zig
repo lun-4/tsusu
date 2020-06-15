@@ -25,6 +25,18 @@ pub fn superviseProcess(ctx: SupervisorContext) !void {
 
     state.logger.info("sup:{}: arg0 = {}\n", .{ ctx.service.name, argv.items[0] });
 
-    var proc = try std.ChildProcess.init(argv.items, allocator);
-    try proc.spawn();
+    while (true) {
+        var proc = try std.ChildProcess.init(argv.items, allocator);
+        //state.pushMessage(.{
+        //    .ServiceStarted = .{ .name = ctx.service.name },
+        //});
+
+        const term_result = try proc.spawnAndWait();
+
+        //state.pushMessage(.{
+        //    .ServiceExited = .{ .name = ctx.service.name, .term = term_result },
+        //});
+
+        std.time.sleep(5 * std.time.s_per_ns);
+    }
 }
