@@ -205,6 +205,7 @@ fn readManyFromClient(
     var stream = sock.outStream();
 
     const message = try in_stream.readUntilDelimiterAlloc(allocator, '!', 1024);
+    errdefer allocator.free(message);
 
     logger.info("got msg from fd {}, {} '{}'", .{ sock.handle, message.len, message });
 
