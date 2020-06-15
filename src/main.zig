@@ -85,7 +85,10 @@ pub const Context = struct {
         std.os.close(std.os.STDOUT_FILENO);
         std.os.close(std.os.STDERR_FILENO);
         daemon.main(&logger) catch |err| {
-            logger.info("had error: {}", .{err});
+            logger.info("had error: {}", .{@errorName(err)});
+            if (@errorReturnTrace()) |trace| {
+                logger.printTrace(trace.*);
+            }
         };
     }
 };
