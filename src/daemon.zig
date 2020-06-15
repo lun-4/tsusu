@@ -14,9 +14,6 @@ pub const Service = struct {
     supervisor: ?*std.Thread = null,
 };
 
-// 250 messages at any given time
-const MAX_MAILBOX_SIZE = 250;
-
 pub const ServiceMap = std.StringHashMap(Service);
 pub const FileLogger = Logger(std.fs.File.OutStream);
 
@@ -29,8 +26,6 @@ pub const Message = union(MessageOP) {
     ServiceStarted: struct { name: []const u8 },
     ServiceExited: struct { name: []const u8, exit_code: u32 },
 };
-
-pub const Mailbox = std.ArrayList(Message);
 
 pub const ServiceDecl = struct {
     name: []const u8,
@@ -72,12 +67,16 @@ fn deserializeSlice(
 }
 
 fn deserializeString(allocator: *std.mem.Allocator, deserializer: var) ![]u8 {
-    const string_length = try deserializer.deserialize(u8);
-    return try deserializeSlice(allocator, deserializer, u8, string_length);
+    const string_length = try deserializer.deserialize(u32);
+    std.debug.assert(string_length > 0);
+
+    var result = try deserializeSlice(allocator, deserializer, u8, string_length);
+    std.debug.assert(result.len == string_length);
+    return result;
 }
 
 fn serializeString(serializer: var, string: []const u8) !void {
-    try serializer.serialize(string.len);
+    try serializer.serialize(@intCast(u32, string.len));
     for (string) |byte| {
         try serializer.serialize(byte);
     }
@@ -87,7 +86,6 @@ pub const DaemonState = struct {
     allocator: *std.mem.Allocator,
     services: ServiceMap,
     logger: *FileLogger,
-    mailbox: Mailbox,
 
     status_pipe: [2]std.os.fd_t,
 
@@ -96,7 +94,6 @@ pub const DaemonState = struct {
             .allocator = allocator,
             .services = ServiceMap.init(allocator),
             .logger = logger,
-            .mailbox = Mailbox.init(allocator),
             .status_pipe = try std.os.pipe(),
         };
     }
@@ -114,9 +111,11 @@ pub const DaemonState = struct {
         try serializer.serialize(opcode);
         switch (message) {
             .ServiceStarted => |data| {
+                self.logger.info("serial start {}", .{data.name});
                 try serializeString(&serializer, data.name);
             },
             .ServiceExited => |data| {
+                self.logger.info("serial exit {} {}", .{ data.name, data.exit_code });
                 try serializeString(&serializer, data.name);
                 try serializer.serialize(data.exit_code);
             },
@@ -152,7 +151,7 @@ pub const DaemonState = struct {
             .ServiceStarted => {
                 const service_name = try deserializeString(self.allocator, &deserializer);
                 defer self.allocator.free(service_name);
-                self.logger.info("serivce {x} started", .{service_name});
+                self.logger.info("serivce {} started", .{service_name});
             },
 
             .ServiceExited => {
@@ -160,7 +159,7 @@ pub const DaemonState = struct {
                 defer self.allocator.free(service_name);
 
                 const exit_code = try deserializer.deserialize(u32);
-                self.logger.info("serivce {x} exited with status {}", .{ service_name, exit_code });
+                self.logger.info("serivce {} exited with status {}", .{ service_name, exit_code });
             },
         }
     }
