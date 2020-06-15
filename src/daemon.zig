@@ -27,11 +27,11 @@ pub const ServiceDecl = struct {
 pub const DaemonState = struct {
     allocator: *std.mem.Allocator,
     services: ServiceMap,
-    logger: FileLogger,
+    logger: *FileLogger,
 
     mailbox: Mailbox,
 
-    pub fn init(allocator: *std.mem.Allocator, logger: FileLogger) @This() {
+    pub fn init(allocator: *std.mem.Allocator, logger: *FileLogger) @This() {
         return .{
             .allocator = allocator,
             .services = ServiceMap.init(allocator),
@@ -148,7 +148,7 @@ fn sigemptyset(set: *std.os.sigset_t) void {
     }
 }
 
-pub fn main(logger: FileLogger) anyerror!void {
+pub fn main(logger: *FileLogger) anyerror!void {
     logger.info("main!", .{});
     const allocator = std.heap.page_allocator;
 

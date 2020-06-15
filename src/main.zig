@@ -84,7 +84,7 @@ pub const Context = struct {
         std.os.close(std.os.STDIN_FILENO);
         std.os.close(std.os.STDOUT_FILENO);
         std.os.close(std.os.STDERR_FILENO);
-        daemon.main(logger) catch |err| {
+        daemon.main(&logger) catch |err| {
             logger.info("had error: {}", .{err});
         };
     }
