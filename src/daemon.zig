@@ -136,34 +136,13 @@ pub fn main(logger: *FileLogger) anyerror!void {
     var mask: std.os.sigset_t = undefined;
 
     sigemptyset(&mask);
-    logger.info("sigemptyset", .{});
-    for (mask) |val, idx| {
-        logger.info("mask[{}] = {}", .{ idx, val });
-    }
-
-    logger.info("sigaddset term", .{});
     os.linux.sigaddset(&mask, std.os.SIGTERM);
-    for (mask) |val, idx| {
-        logger.info("mask[{}] = {}", .{ idx, val });
-    }
-
     os.linux.sigaddset(&mask, std.os.SIGINT);
-    logger.info("sigaddset int", .{});
-    for (mask) |val, idx| {
-        logger.info("mask[{}] = {}", .{ idx, val });
-    }
 
     _ = os.linux.sigprocmask(std.os.SIG_BLOCK, &mask, null);
     // mask[20] = 16386;
-    logger.info("sigprocmask", .{});
-    for (mask) |val, idx| {
-        logger.info("mask[{}] = {}", .{ idx, val });
-    }
 
-    const signal_fd = os.signalfd(-1, &mask, 0) catch |err| {
-        logger.info("err!", .{});
-        return err;
-    };
+    const signal_fd = try os.signalfd(-1, &mask, 0);
     defer os.close(signal_fd);
     logger.info("signalfd: {}", .{signal_fd});
 
@@ -174,7 +153,7 @@ pub fn main(logger: *FileLogger) anyerror!void {
 
     try server.listen(addr);
 
-    logger.info("bind+listen done on fd={}", .{server.sockfd});
+    logger.info("listen done on fd={}", .{server.sockfd});
 
     var sockets = PollFdList.init(allocator);
     defer sockets.deinit();
