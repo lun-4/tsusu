@@ -20,7 +20,15 @@ const MAX_MAILBOX_SIZE = 250;
 pub const ServiceMap = std.StringHashMap(Service);
 pub const FileLogger = Logger(std.fs.File.OutStream);
 
-pub const Message = struct {};
+pub const MessageOP = enum(u8) {
+    ServiceStarted,
+    ServiceExited,
+};
+
+pub const Message = union(enum) {
+    ServiceStarted: struct { name: []const u8 },
+    ServiceExited: struct { name: []const u8, term: std.ChildProcess.Term },
+};
 pub const Mailbox = std.ArrayList(Message);
 
 pub const ServiceDecl = struct {
@@ -28,19 +36,53 @@ pub const ServiceDecl = struct {
     cmdline: []const u8,
 };
 
+const BufferType = std.io.FixedBufferStream([]const u8);
+
+const FileInStream = std.io.InStream(std.fs.File, std.os.ReadError, std.fs.File.read);
+
+pub const MsgDeserializer = std.io.Deserializer(
+    .Little,
+    .Byte,
+    FileInStream,
+);
+
+// Caller owns the returned memory.
+fn deserializeSlice(
+    allocator: *std.mem.Allocator,
+    deserializer: var,
+    comptime T: type,
+    size: usize,
+) ![]T {
+    var value = try allocator.alloc(T, size);
+
+    var i: usize = 0;
+    while (i < size) : (i += 1) {
+        value[i] = try deserializer.deserialize(T);
+    }
+
+    return value;
+}
+
+fn deserializeString(allocator: *std.mem.Allocator, deserializer: var) ![]u8 {
+    const string_length = try deserializer.deserialize(u8);
+    return try deserializeSlice(allocator, deserializer, u8, string_length);
+}
+
 pub const DaemonState = struct {
     allocator: *std.mem.Allocator,
     services: ServiceMap,
     logger: *FileLogger,
-
     mailbox: Mailbox,
 
-    pub fn init(allocator: *std.mem.Allocator, logger: *FileLogger) @This() {
-        return .{
+    status_pipe: [2]std.os.fd_t,
+
+    pub fn init(allocator: *std.mem.Allocator, logger: *FileLogger) !@This() {
+        return DaemonState{
             .allocator = allocator,
             .services = ServiceMap.init(allocator),
             .logger = logger,
             .mailbox = Mailbox.init(allocator),
+            .status_pipe = try std.os.pipe(),
         };
     }
 
@@ -48,7 +90,7 @@ pub const DaemonState = struct {
         self.services.deinit();
     }
 
-    pub fn pushMessage(self: *@This(), message: *Message) !void {
+    pub fn pushMessage(self: *@This(), message: Message) !void {
         if (self.mailbox.items.len > MAX_MAILBOX_SIZE) return error.FullMailbox;
         try self.mailbox.append(message);
     }
@@ -67,6 +109,56 @@ pub const DaemonState = struct {
             service.name,
             .{ .path = service.cmdline, .supervisor = thread },
         );
+    }
+
+    fn readStatusMessage(self: *@This()) !void {
+        var statusFile = std.fs.File{ .handle = self.status_pipe[0] };
+        var stream = statusFile.inStream();
+        var deserializer = MsgDeserializer.init(stream);
+
+        const opcode = try deserializer.deserialize(u8);
+
+        switch (@intToEnum(MessageOP, opcode)) {
+            .ServiceStarted => {
+                const service_name = try deserializeString(self.allocator, &deserializer);
+                defer self.allocator.free(service_name);
+                self.logger.info("serivce {} started\n", .{service_name});
+            },
+
+            .ServiceExited => {
+                const service_name = try deserializeString(self.allocator, &deserializer);
+                defer self.allocator.free(service_name);
+
+                const exit_code = try deserializer.deserialize(u32);
+                self.logger.info("serivce {} exited with status {}\n", .{ service_name, exit_code });
+            },
+        }
+    }
+
+    pub fn handleMessages(self: *@This()) !void {
+        var sockets = PollFdList.init(self.allocator);
+        defer sockets.deinit();
+
+        try sockets.append(os.pollfd{
+            .fd = self.status_pipe[0],
+            .events = os.POLLIN,
+            .revents = 0,
+        });
+
+        while (true) {
+            const available = try os.poll(sockets.items, -1);
+            if (available == 0) {
+                self.logger.info("timed out, retrying", .{});
+                continue;
+            }
+
+            for (sockets.items) |pollfd, idx| {
+                if (pollfd.fd == self.status_pipe[0]) {
+                    // got status data to read
+                    try self.readStatusMessage();
+                }
+            }
+        }
     }
 };
 
@@ -170,7 +262,12 @@ pub fn main(logger: *FileLogger) anyerror!void {
         .revents = 0,
     });
 
-    var state = DaemonState.init(allocator, logger);
+    var state = try DaemonState.init(allocator, logger);
+
+    const daemon_message_thread = try std.Thread.spawn(
+        &state,
+        DaemonState.handleMessages,
+    );
 
     while (true) {
         var pollfds = sockets.items;
@@ -181,8 +278,6 @@ pub fn main(logger: *FileLogger) anyerror!void {
             logger.info("timed out, retrying", .{});
             continue;
         }
-
-        // TODO remove our WouldBlock checks when we have an event loop here
 
         for (pollfds) |pollfd, idx| {
             if (pollfd.revents == 0) continue;
