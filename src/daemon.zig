@@ -9,12 +9,21 @@ const supervisors = @import("supervisor.zig");
 const superviseProcess = supervisors.superviseProcess;
 const SupervisorContext = supervisors.SupervisorContext;
 
+pub const ServiceState = union(enum) {
+    NotRunning: void,
+    Running: void,
+    Restarting: u32,
+    Stopped: u32,
+};
+
 pub const Service = struct {
     path: []const u8,
     supervisor: ?*std.Thread = null,
+
+    state: ServiceState = ServiceState{ .NotRunning = {} },
 };
 
-pub const ServiceMap = std.StringHashMap(Service);
+pub const ServiceMap = std.StringHashMap(*Service);
 pub const FileLogger = Logger(std.fs.File.OutStream);
 
 pub const MessageOP = enum(u8) {
@@ -111,32 +120,41 @@ pub const DaemonState = struct {
         try serializer.serialize(opcode);
         switch (message) {
             .ServiceStarted => |data| {
-                self.logger.info("serial start {}", .{data.name});
                 try serializeString(&serializer, data.name);
             },
             .ServiceExited => |data| {
-                self.logger.info("serial exit {} {}", .{ data.name, data.exit_code });
                 try serializeString(&serializer, data.name);
                 try serializer.serialize(data.exit_code);
             },
         }
-
-        self.logger.info("sup sent msg op={}", .{opcode});
     }
 
     pub fn writeServices(self: @This(), stream: var) !void {
         var services_it = self.services.iterator();
         while (services_it.next()) |kv| {
             self.logger.info("serv: {} {}", .{ kv.key, kv.value.path });
-            try stream.print("{},{};", .{ kv.key, kv.value.path });
+
+            var buf: [50]u8 = undefined;
+
+            const state_string = switch (kv.value.state) {
+                .NotRunning => "notrunning",
+                .Running => "running",
+                .Stopped => |code| try std.fmt.bufPrint(&buf, "stopped (code {})", .{code}),
+                .Restarting => |code| try std.fmt.bufPrint(&buf, "restarting (was code {})", .{code}),
+            };
+
+            try stream.print("{},{};", .{ kv.key, state_string });
         }
         _ = try stream.write("!");
     }
 
     pub fn addSupervisor(self: *@This(), service: ServiceDecl, thread: *std.Thread) !void {
+        var service_ptr = try self.allocator.create(Service);
+        service_ptr.* =
+            .{ .path = service.cmdline, .supervisor = thread };
         _ = try self.services.put(
             service.name,
-            .{ .path = service.cmdline, .supervisor = thread },
+            service_ptr,
         );
     }
 
@@ -152,6 +170,7 @@ pub const DaemonState = struct {
                 const service_name = try deserializeString(self.allocator, &deserializer);
                 defer self.allocator.free(service_name);
                 self.logger.info("serivce {} started", .{service_name});
+                self.services.get(service_name).?.value.state = ServiceState{ .Running = {} };
             },
 
             .ServiceExited => {
@@ -160,6 +179,7 @@ pub const DaemonState = struct {
 
                 const exit_code = try deserializer.deserialize(u32);
                 self.logger.info("serivce {} exited with status {}", .{ service_name, exit_code });
+                self.services.get(service_name).?.value.state = ServiceState{ .Stopped = exit_code };
             },
         }
     }
