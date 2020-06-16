@@ -130,10 +130,9 @@ fn getMode(mode_arg: []const u8) !Mode {
 }
 
 pub fn printServices(msg: []const u8) void {
-    std.debug.warn("name | path\n", .{});
+    std.debug.warn("name | state\n", .{});
     var it = std.mem.split(msg, ";");
     while (it.next()) |service_line| {
-        // lol what
         if (service_line.len == 0) break;
 
         var serv_it = std.mem.split(service_line, ",");
