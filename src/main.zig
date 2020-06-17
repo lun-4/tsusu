@@ -8,6 +8,7 @@ const mem = std.mem;
 
 const Logger = @import("logger.zig").Logger;
 const helpers = @import("helpers.zig");
+const fetchProcessStats = @import("process_stats.zig").fetchProcessStats;
 
 pub const Context = struct {
     allocator: *std.mem.Allocator,
@@ -55,7 +56,7 @@ pub const Context = struct {
             return;
         }
 
-        const val = umask(0);
+        _ = umask(0);
 
         const daemon_pid = os.linux.getpid();
         const pidpath = try helpers.getPathFor(self.allocator, .Pid);
@@ -79,7 +80,8 @@ pub const Context = struct {
             std.os.unlink(pidpath) catch |err| {}; // do nothing on errors
         }
 
-        const sid = try setsid();
+        _ = try setsid();
+
         try std.os.chdir("/");
         std.os.close(std.os.STDIN_FILENO);
         std.os.close(std.os.STDOUT_FILENO);
@@ -149,7 +151,8 @@ pub fn printServices(msg: []const u8) !void {
                 const pid = try std.fmt.parseInt(std.os.pid_t, serv_it.next().?, 10);
 
                 // since its running, we can calculate cpu and ram usage
-                std.debug.warn("running | {}", .{pid});
+                const stats = try fetchProcessStats(pid, .{});
+                std.debug.warn("running | {} | {}%", .{ pid, stats.cpu_usage });
             },
             2 => {
                 const exit_code = try std.fmt.parseInt(u32, serv_it.next().?, 10);
