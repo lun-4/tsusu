@@ -147,6 +147,8 @@ pub fn printServices(msg: []const u8) !void {
             0 => std.debug.warn("not running | 0", .{}),
             1 => {
                 const pid = try std.fmt.parseInt(std.os.pid_t, serv_it.next().?, 10);
+
+                // since its running, we can calculate cpu and ram usage
                 std.debug.warn("running | {}", .{pid});
             },
             2 => {
