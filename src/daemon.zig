@@ -11,7 +11,7 @@ const SupervisorContext = supervisors.SupervisorContext;
 
 pub const ServiceState = union(enum) {
     NotRunning: void,
-    Running: void,
+    Running: std.os.pid_t,
     Restarting: u32,
     Stopped: u32,
 };
@@ -32,7 +32,7 @@ pub const MessageOP = enum(u8) {
 };
 
 pub const Message = union(MessageOP) {
-    ServiceStarted: struct { name: []const u8 },
+    ServiceStarted: struct { name: []const u8, pid: std.os.pid_t },
     ServiceExited: struct { name: []const u8, exit_code: u32 },
 };
 
@@ -121,6 +121,7 @@ pub const DaemonState = struct {
         switch (message) {
             .ServiceStarted => |data| {
                 try serializeString(&serializer, data.name);
+                try serializer.serialize(data.pid);
             },
             .ServiceExited => |data| {
                 try serializeString(&serializer, data.name);
@@ -136,14 +137,16 @@ pub const DaemonState = struct {
 
             var buf: [50]u8 = undefined;
 
+            try stream.print("{},", .{kv.key});
+
             const state_string = switch (kv.value.state) {
-                .NotRunning => "notrunning",
-                .Running => "running",
-                .Stopped => |code| try std.fmt.bufPrint(&buf, "stopped (code {})", .{code}),
-                .Restarting => |code| try std.fmt.bufPrint(&buf, "restarting (was code {})", .{code}),
+                .NotRunning => try stream.print("0", .{}),
+                .Running => |pid| try stream.print("1,{}", .{pid}),
+                .Stopped => |code| try stream.print("2,{}", .{code}),
+                .Restarting => |code| try stream.print("3,{}", .{code}),
             };
 
-            try stream.print("{},{};", .{ kv.key, state_string });
+            try stream.print(";", .{});
         }
         _ = try stream.write("!");
     }
@@ -169,8 +172,10 @@ pub const DaemonState = struct {
             .ServiceStarted => {
                 const service_name = try deserializeString(self.allocator, &deserializer);
                 defer self.allocator.free(service_name);
-                self.logger.info("serivce {} started", .{service_name});
-                self.services.get(service_name).?.value.state = ServiceState{ .Running = {} };
+
+                const pid = try deserializer.deserialize(std.os.pid_t);
+                self.logger.info("serivce {} started on pid {}", .{ service_name, pid });
+                self.services.get(service_name).?.value.state = ServiceState{ .Running = pid };
             },
 
             .ServiceExited => {

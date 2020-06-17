@@ -129,14 +129,38 @@ fn getMode(mode_arg: []const u8) !Mode {
     return error.UnknownMode;
 }
 
-pub fn printServices(msg: []const u8) void {
-    std.debug.warn("name | state\n", .{});
+pub fn printServices(msg: []const u8) !void {
+    std.debug.warn("name | state | pid\n", .{});
     var it = std.mem.split(msg, ";");
     while (it.next()) |service_line| {
         if (service_line.len == 0) break;
 
         var serv_it = std.mem.split(service_line, ",");
-        std.debug.warn("{} | {}\n", .{ serv_it.next().?, serv_it.next().? });
+        const name = serv_it.next().?;
+        const state_str = serv_it.next().?;
+
+        const state = try std.fmt.parseInt(u8, state_str, 10);
+
+        std.debug.warn("{} | ", .{name});
+
+        switch (state) {
+            0 => std.debug.warn("not running | 0", .{}),
+            1 => {
+                const pid = try std.fmt.parseInt(std.os.pid_t, serv_it.next().?, 10);
+                std.debug.warn("running | {}", .{pid});
+            },
+            2 => {
+                const exit_code = try std.fmt.parseInt(u32, serv_it.next().?, 10);
+                std.debug.warn("exited ({}) | 0", .{exit_code});
+            },
+            3 => {
+                const exit_code = try std.fmt.parseInt(u32, serv_it.next().?, 10);
+                std.debug.warn("restarting ({}) | 0", .{exit_code});
+            },
+            else => unreachable,
+        }
+
+        std.debug.warn("\n", .{});
     }
 }
 
@@ -214,7 +238,7 @@ pub fn main() anyerror!void {
                 return;
             }
 
-            printServices(msg);
+            try printServices(msg);
         },
 
         .Start => blk: {
@@ -227,7 +251,7 @@ pub fn main() anyerror!void {
             std.debug.warn("[c]sent\n", .{});
             const msg = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 1024);
             defer ctx.allocator.free(msg);
-            printServices(msg);
+            try printServices(msg);
         },
 
         else => std.debug.warn("TODO implement mode {}\n", .{mode}),

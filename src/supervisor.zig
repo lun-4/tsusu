@@ -27,13 +27,16 @@ pub fn superviseProcess(ctx: SupervisorContext) !void {
 
     while (true) {
         var proc = try std.ChildProcess.init(argv.items, allocator);
+
+        try proc.spawn();
+
         state.pushMessage(.{
-            .ServiceStarted = .{ .name = ctx.service.name },
+            .ServiceStarted = .{ .name = ctx.service.name, .pid = proc.pid },
         }) catch |err| {
             state.logger.info("Failed to send started message to daemon.", .{});
         };
 
-        const term_result = try proc.spawnAndWait();
+        const term_result = try proc.wait();
 
         switch (term_result) {
             .Exited, .Signal, .Stopped, .Unknown => |exit_code| {
