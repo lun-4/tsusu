@@ -10,6 +10,9 @@ const Logger = @import("logger.zig").Logger;
 const helpers = @import("helpers.zig");
 const fetchProcessStats = @import("process_stats.zig").fetchProcessStats;
 
+const util = @import("util.zig");
+const prettyMemoryUsage = util.prettyMemoryUsage;
+
 pub const Context = struct {
     allocator: *std.mem.Allocator,
     args_it: std.process.ArgIterator,
@@ -152,7 +155,9 @@ pub fn printServices(msg: []const u8) !void {
 
                 // since its running, we can calculate cpu and ram usage
                 const stats = try fetchProcessStats(pid, .{});
-                std.debug.warn("running | {} | {d:.1}%", .{ pid, stats.cpu_usage });
+                var buffer: [128]u8 = undefined;
+                const pretty_memory_usage = try prettyMemoryUsage(&buffer, stats.memory_usage);
+                std.debug.warn("running | {} | {d:.1}% | {}", .{ pid, stats.cpu_usage, pretty_memory_usage });
             },
             2 => {
                 const exit_code = try std.fmt.parseInt(u32, serv_it.next().?, 10);

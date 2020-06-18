@@ -168,7 +168,10 @@ fn readStatmFile(statm_path: []const u8) !StatmFile {
 
     var it = std.mem.split(statm_line, " ");
 
-    const resident = try std.fmt.parseInt(u64, it.next().?, 10);
+    _ = it.next();
+    const rss_str = it.next().?;
+    std.debug.warn("rss_str = {}\n", .{rss_str});
+    const resident = try std.fmt.parseInt(u64, rss_str, 10);
     _ = it.next();
     _ = it.next();
     _ = it.next();
@@ -187,8 +190,10 @@ pub fn fetchProcessStats(pid: std.os.pid_t, options: StatsOptions) !Stats {
     // TODO: write sysconf(_SC_CLK_TCK). this is hardcoded for my machine
     const clock_ticks = 100;
 
+    // TODO: write sysconf(_SC_PAGE_SIZE). this is hardcoded for my machine
+    const page_size = 4096;
+
     const uptime = try fetchUptime();
-    const total_memory = try fetchTotalMemory();
 
     // pids are usually 5 digit, so we can keep a lot of space for them
     var path_buffer: [64]u8 = undefined;
@@ -209,8 +214,10 @@ pub fn fetchProcessStats(pid: std.os.pid_t, options: StatsOptions) !Stats {
 
     // calculate ram usage
     const statm_path = try std.fmt.bufPrint(&path_buffer, "/proc/{}/statm", .{pid});
-    const statm_data = try readStatmFile(stat_path);
-    const memory_usage = ((statm_data.resident + statm_data.data_and_stack) * 100) / total_memory;
+    const statm_data = try readStatmFile(statm_path);
+    const memory_usage = statm_data.resident + statm_data.data_and_stack;
+
+    std.debug.warn("{} + {} = {}\n", .{ statm_data.resident, statm_data.data_and_stack, memory_usage });
 
     return Stats{ .cpu_usage = cpu_usage, .memory_usage = memory_usage };
 }
