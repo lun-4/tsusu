@@ -31,9 +31,9 @@ pub const Context = struct {
 
         const sock_path = try helpers.getPathFor(self.allocator, .Sock);
 
-        std.debug.warn("trying to connect to socket ({})...\n", .{sock_path});
+        std.debug.warn("connecting to socket ({})...\n", .{sock_path});
         return std.net.connectUnixSocket(sock_path) catch |err| {
-            std.debug.warn("failed (error: {}), trying for the {} time...", .{ err, self.tries });
+            std.debug.warn("failed (error: {}), starting and retrying (try {})...", .{ err, self.tries });
             try self.spawnDaemon();
 
             // assuming spawning doesn't take more than a second
@@ -126,7 +126,7 @@ pub const Mode = enum {
 
 fn getMode(mode_arg: []const u8) !Mode {
     if (std.mem.eql(u8, mode_arg, "noop")) return .Noop;
-    if (std.mem.eql(u8, mode_arg, "destroy")) return .Destroy;
+    if (std.mem.eql(u8, mode_arg, "destroy") or std.mem.eql(u8, mode_arg, "delete")) return .Destroy;
     if (std.mem.eql(u8, mode_arg, "start")) return .Start;
     if (std.mem.eql(u8, mode_arg, "stop")) return .Stop;
     if (std.mem.eql(u8, mode_arg, "help")) return .Help;
@@ -175,6 +175,10 @@ pub fn printServices(msg: []const u8) !void {
 
         std.debug.warn("\n", .{});
     }
+}
+
+fn stopCommand(ctx: Context, in_stream: var, out_stream: var) !void {
+    @panic("TODO");
 }
 
 pub fn main() anyerror!void {
@@ -240,7 +244,8 @@ pub fn main() anyerror!void {
     var buf = try ctx.allocator.alloc(u8, 1024);
     switch (mode) {
         .Noop => {},
-        .List => blk: {
+
+        .List => {
             _ = try sock.write("list!");
 
             const msg = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 1024);
@@ -254,18 +259,18 @@ pub fn main() anyerror!void {
             try printServices(msg);
         },
 
-        .Start => blk: {
-            std.debug.warn("[c]try send\n", .{});
+        .Start => {
             try out_stream.print("start;{};{}!", .{
                 try (ctx.args_it.next(allocator) orelse @panic("expected name")),
                 try (ctx.args_it.next(allocator) orelse @panic("expected path")),
             });
 
-            std.debug.warn("[c]sent\n", .{});
             const msg = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 1024);
             defer ctx.allocator.free(msg);
             try printServices(msg);
         },
+
+        .Stop => try stopCommand(ctx, in_stream, out_stream),
 
         else => std.debug.warn("TODO implement mode {}\n", .{mode}),
     }
