@@ -1,3 +1,9 @@
+// CPU/RAM statistics given the PID of a process.
+
+// This uses procfs heavily, and while procfs lives in memory and works,
+// maybe it isn't the most scalable solution. We could peek into netlink, but
+// that can be done later.
+
 const std = @import("std");
 
 pub const Stats = struct {
