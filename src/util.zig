@@ -5,7 +5,6 @@ const std = @import("std");
 pub fn prettyMemoryUsage(buffer: []u8, kilobytes: u64) ![]const u8 {
     const megabytes = kilobytes / 1024;
     const gigabytes = megabytes / 1024;
-    std.debug.warn("{} {} {}\n", .{ kilobytes, megabytes, gigabytes });
 
     if (kilobytes < 1024) {
         return try std.fmt.bufPrint(buffer, "{} KB", .{kilobytes});

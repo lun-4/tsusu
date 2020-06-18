@@ -4,9 +4,7 @@ pub const Stats = struct {
     cpu_usage: f64, memory_usage: u64
 };
 
-pub const StatsOptions = struct {};
-
-pub const StatsFile = struct {
+const StatsFile = struct {
     utime: u32,
     stime: u32,
     cstime: u32,
@@ -170,7 +168,6 @@ fn readStatmFile(statm_path: []const u8) !StatmFile {
 
     _ = it.next();
     const rss_str = it.next().?;
-    std.debug.warn("rss_str = {}\n", .{rss_str});
     const resident = try std.fmt.parseInt(u64, rss_str, 10);
     _ = it.next();
     _ = it.next();
@@ -183,41 +180,49 @@ fn readStatmFile(statm_path: []const u8) !StatmFile {
     };
 }
 
-// TODO convert to Stats struct as we need to syscall to get _SC_CLK_TCK,
-// also reading /proc/meminfo which is global
-pub fn fetchProcessStats(pid: std.os.pid_t, options: StatsOptions) !Stats {
+pub const ProcessStats = struct {
+    clock_ticks: u64,
 
-    // TODO: write sysconf(_SC_CLK_TCK). this is hardcoded for my machine
-    const clock_ticks = 100;
+    pub fn init() @This() {
+        return .{
+            // TODO: write sysconf(_SC_CLK_TCK). this is hardcoded for my machine
+            .clock_ticks = 100,
+        };
+    }
 
-    // TODO: write sysconf(_SC_PAGE_SIZE). this is hardcoded for my machine
-    const page_size = 4096;
+    pub fn fetchCPUStats(self: @This(), pid: std.os.pid_t) !f64 {
+        // Always refetch uptime on every cpu stat fetch.
+        const uptime = try fetchUptime();
 
-    const uptime = try fetchUptime();
+        // pids are usually 5 digit, so we can keep a lot of space for them
+        var path_buffer: [64]u8 = undefined;
+        const stat_path = try std.fmt.bufPrint(&path_buffer, "/proc/{}/stat", .{pid});
+        const stats1 = try readStatsFile(stat_path);
 
-    // pids are usually 5 digit, so we can keep a lot of space for them
-    var path_buffer: [64]u8 = undefined;
-    const stat_path = try std.fmt.bufPrint(&path_buffer, "/proc/{}/stat", .{pid});
+        const utime = stats1.utime;
+        const stime = stats1.stime;
+        const cstime = stats1.cstime;
+        const starttime = stats1.starttime;
 
-    // Calculate CPU usage
-    const stats1 = try readStatsFile(stat_path);
+        const total_time = utime + stime + cstime;
+        const seconds = uptime - (starttime / self.clock_ticks);
 
-    const utime = stats1.utime;
-    const stime = stats1.stime;
-    const cstime = stats1.cstime;
-    const starttime = stats1.starttime;
+        return @as(f64, 100) *
+            ((@intToFloat(f64, total_time) / @intToFloat(f64, self.clock_ticks)) / @intToFloat(f64, seconds));
+    }
 
-    const total_time = utime + stime + cstime;
-    const seconds = uptime - (starttime / clock_ticks);
-    const cpu_usage: f64 = @as(f64, 100) *
-        ((@intToFloat(f64, total_time) / @intToFloat(f64, clock_ticks)) / @intToFloat(f64, seconds));
+    pub fn fetchMemoryUsage(self: @This(), pid: std.os.pid_t) !u64 {
+        var path_buffer: [64]u8 = undefined;
+        // calculate ram usage
+        const statm_path = try std.fmt.bufPrint(&path_buffer, "/proc/{}/statm", .{pid});
+        const statm_data = try readStatmFile(statm_path);
+        return statm_data.resident + statm_data.data_and_stack;
+    }
 
-    // calculate ram usage
-    const statm_path = try std.fmt.bufPrint(&path_buffer, "/proc/{}/statm", .{pid});
-    const statm_data = try readStatmFile(statm_path);
-    const memory_usage = statm_data.resident + statm_data.data_and_stack;
-
-    std.debug.warn("{} + {} = {}\n", .{ statm_data.resident, statm_data.data_and_stack, memory_usage });
-
-    return Stats{ .cpu_usage = cpu_usage, .memory_usage = memory_usage };
-}
+    pub fn fetchAllStats(self: @This(), pid: std.os.pid_t) !Stats {
+        return Stats{
+            .cpu_usage = try self.fetchCPUStats(pid),
+            .memory_usage = try self.fetchMemoryUsage(pid),
+        };
+    }
+};

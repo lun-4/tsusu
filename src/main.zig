@@ -8,7 +8,7 @@ const mem = std.mem;
 
 const Logger = @import("logger.zig").Logger;
 const helpers = @import("helpers.zig");
-const fetchProcessStats = @import("process_stats.zig").fetchProcessStats;
+const ProcessStats = @import("process_stats.zig").ProcessStats;
 
 const util = @import("util.zig");
 const prettyMemoryUsage = util.prettyMemoryUsage;
@@ -135,7 +135,7 @@ fn getMode(mode_arg: []const u8) !Mode {
 }
 
 pub fn printServices(msg: []const u8) !void {
-    std.debug.warn("name | state | pid\n", .{});
+    std.debug.warn("name | state\t\tpid\tcpu\tmemory\n", .{});
     var it = std.mem.split(msg, ";");
     while (it.next()) |service_line| {
         if (service_line.len == 0) break;
@@ -149,23 +149,26 @@ pub fn printServices(msg: []const u8) !void {
         std.debug.warn("{} | ", .{name});
 
         switch (state) {
-            0 => std.debug.warn("not running | 0", .{}),
+            0 => std.debug.warn("not running\t\t0\t0%\t0kb", .{}),
             1 => {
                 const pid = try std.fmt.parseInt(std.os.pid_t, serv_it.next().?, 10);
 
-                // since its running, we can calculate cpu and ram usage
-                const stats = try fetchProcessStats(pid, .{});
+                // we can calculate cpu and ram usage since the service
+                // is currently running
+                var proc_stats = ProcessStats.init();
+                const stats = try proc_stats.fetchAllStats(pid);
+
                 var buffer: [128]u8 = undefined;
                 const pretty_memory_usage = try prettyMemoryUsage(&buffer, stats.memory_usage);
-                std.debug.warn("running | {} | {d:.1}% | {}", .{ pid, stats.cpu_usage, pretty_memory_usage });
+                std.debug.warn("running\t\t{}\t{d:.1}%\t{}", .{ pid, stats.cpu_usage, pretty_memory_usage });
             },
             2 => {
                 const exit_code = try std.fmt.parseInt(u32, serv_it.next().?, 10);
-                std.debug.warn("exited ({}) | 0", .{exit_code});
+                std.debug.warn("exited (code {})\t\t0%\t0kb", .{exit_code});
             },
             3 => {
                 const exit_code = try std.fmt.parseInt(u32, serv_it.next().?, 10);
-                std.debug.warn("restarting ({}) | 0", .{exit_code});
+                std.debug.warn("restarting (code {})\t\t0%\t0kb", .{exit_code});
             },
             else => unreachable,
         }
