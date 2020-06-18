@@ -1,7 +1,7 @@
 const std = @import("std");
 
 pub const Stats = struct {
-    cpu_usage: u64
+    cpu_usage: f64
 };
 
 pub const StatsOptions = struct {};
@@ -145,5 +145,5 @@ pub fn fetchProcessStats(pid: std.os.pid_t, options: StatsOptions) !Stats {
     const cpu_usage: f64 = @as(f64, 100) *
         ((@intToFloat(f64, total_time) / @intToFloat(f64, clock_ticks)) / @intToFloat(f64, seconds));
 
-    return Stats{ .cpu_usage = @floatToInt(u64, std.math.floor(cpu_usage)) };
+    return Stats{ .cpu_usage = cpu_usage };
 }

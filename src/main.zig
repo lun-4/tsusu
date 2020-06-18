@@ -152,7 +152,7 @@ pub fn printServices(msg: []const u8) !void {
 
                 // since its running, we can calculate cpu and ram usage
                 const stats = try fetchProcessStats(pid, .{});
-                std.debug.warn("running | {} | {}%", .{ pid, stats.cpu_usage });
+                std.debug.warn("running | {} | {d:.1}%", .{ pid, stats.cpu_usage });
             },
             2 => {
                 const exit_code = try std.fmt.parseInt(u32, serv_it.next().?, 10);
