@@ -1,7 +1,7 @@
 const std = @import("std");
 
 pub const Stats = struct {
-    cpu_usage: f64
+    cpu_usage: f64, memory_usage: u64
 };
 
 pub const StatsOptions = struct {};
@@ -116,17 +116,79 @@ fn readStatsFile(path: []const u8) !StatsFile {
     };
 }
 
-// TODO convert to Stats struct as we need to syscall to get _SC_CLK_TCK
-pub fn fetchProcessStats(pid: std.os.pid_t, options: StatsOptions) !Stats {
-    const clock_ticks = 100;
-
+fn fetchUptime() !u64 {
     var uptime_file = try std.fs.cwd().openFile("/proc/uptime", .{ .read = true, .write = false });
     defer uptime_file.close();
 
     var uptime_buffer: [64]u8 = undefined;
     const uptime_str = try uptime_file.inStream().readUntilDelimiterOrEof(&uptime_buffer, ' ');
     const uptime_float = try std.fmt.parseFloat(f64, uptime_str.?);
-    const uptime = @floatToInt(u64, uptime_float);
+    return @floatToInt(u64, uptime_float);
+}
+
+/// Fetch total memory in kilobytes of the system.
+fn fetchTotalMemory() !u64 {
+    var meminfo_file = try std.fs.cwd().openFile("/proc/meminfo", .{ .read = true, .write = false });
+    defer meminfo_file.close();
+
+    while (true) {
+        var line_buffer: [128]u8 = undefined;
+        const line_opt = try meminfo_file.inStream().readUntilDelimiterOrEof(&line_buffer, '\n');
+        if (line_opt) |line| {
+            var it = std.mem.tokenize(line, " ");
+            const line_header = it.next().?;
+            if (!std.mem.eql(u8, line_header, "MemTotal:")) {
+                continue;
+            }
+
+            const mem_total_str = it.next().?;
+            return try std.fmt.parseInt(u64, mem_total_str, 10);
+        } else {
+            // reached eof
+            break;
+        }
+    }
+
+    unreachable;
+}
+
+pub const StatmFile = struct {
+    resident: u64,
+    data_and_stack: u64,
+};
+
+fn readStatmFile(statm_path: []const u8) !StatmFile {
+    var statm = try std.fs.cwd().openFile(statm_path, .{ .read = true, .write = false });
+    defer statm.close();
+
+    // TODO check if [512]u8 is what we want
+    var statm_buffer: [512]u8 = undefined;
+    const read_bytes = try statm.read(&statm_buffer);
+    const statm_line = statm_buffer[0..read_bytes];
+
+    var it = std.mem.split(statm_line, " ");
+
+    const resident = try std.fmt.parseInt(u64, it.next().?, 10);
+    _ = it.next();
+    _ = it.next();
+    _ = it.next();
+    const data_and_stack = try std.fmt.parseInt(u64, it.next().?, 10);
+
+    return StatmFile{
+        .resident = resident,
+        .data_and_stack = data_and_stack,
+    };
+}
+
+// TODO convert to Stats struct as we need to syscall to get _SC_CLK_TCK,
+// also reading /proc/meminfo which is global
+pub fn fetchProcessStats(pid: std.os.pid_t, options: StatsOptions) !Stats {
+
+    // TODO: write sysconf(_SC_CLK_TCK). this is hardcoded for my machine
+    const clock_ticks = 100;
+
+    const uptime = try fetchUptime();
+    const total_memory = try fetchTotalMemory();
 
     // pids are usually 5 digit, so we can keep a lot of space for them
     var path_buffer: [64]u8 = undefined;
@@ -145,5 +207,10 @@ pub fn fetchProcessStats(pid: std.os.pid_t, options: StatsOptions) !Stats {
     const cpu_usage: f64 = @as(f64, 100) *
         ((@intToFloat(f64, total_time) / @intToFloat(f64, clock_ticks)) / @intToFloat(f64, seconds));
 
-    return Stats{ .cpu_usage = cpu_usage };
+    // calculate ram usage
+    const statm_path = try std.fmt.bufPrint(&path_buffer, "/proc/{}/statm", .{pid});
+    const statm_data = try readStatmFile(stat_path);
+    const memory_usage = ((statm_data.resident + statm_data.data_and_stack) * 100) / total_memory;
+
+    return Stats{ .cpu_usage = cpu_usage, .memory_usage = memory_usage };
 }
