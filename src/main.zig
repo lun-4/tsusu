@@ -178,7 +178,13 @@ pub fn printServices(msg: []const u8) !void {
 }
 
 fn stopCommand(ctx: Context, in_stream: var, out_stream: var) !void {
-    @panic("TODO");
+    const name = try (ctx.args_it.next(allocator) orelse @panic("expected name"));
+    std.debug.warn("sending stop '{}'\n", .{name});
+    try out_stream.print("stop;{}!", .{name});
+
+    const msg = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 1024);
+    defer ctx.allocator.free(msg);
+    try printServices(msg);
 }
 
 pub fn main() anyerror!void {
