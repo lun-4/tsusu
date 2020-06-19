@@ -38,6 +38,9 @@ pub fn superviseProcess(ctx: SupervisorContext) !void {
 
         const term_result = try proc.wait();
 
+        // XXX: check state flag for service, if stopped, must not restart,
+        // return instead.
+
         switch (term_result) {
             .Exited, .Signal, .Stopped, .Unknown => |exit_code| {
                 state.pushMessage(.{

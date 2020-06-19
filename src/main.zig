@@ -182,6 +182,8 @@ fn stopCommand(ctx: Context, in_stream: var, out_stream: var) !void {
     std.debug.warn("sending stop '{}'\n", .{name});
     try out_stream.print("stop;{}!", .{name});
 
+    std.time.sleep(1 * std.os.ns_per_s);
+
     const msg = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 1024);
     defer ctx.allocator.free(msg);
     try printServices(msg);

@@ -268,7 +268,50 @@ fn readManyFromClient(
         );
         try state.addSupervisor(service.*, supervisor_thread);
         try state.writeServices(stream);
+    } else if (std.mem.startsWith(u8, message, "stop")) {
+        var parts_it = std.mem.split(message, ";");
+        _ = parts_it.next();
+
+        // TODO: error handling on malformed messages
+        const service_name = parts_it.next().?;
+
+        const kv_opt = state.services.get(service_name);
+        if (kv_opt) |kv| {
+            const service = kv.value;
+            switch (service.state) {
+                .Running => |pid| {
+                    try kill(pid, os.SIGTERM);
+                },
+                else => {},
+            }
+        }
+
+        try state.writeServices(stream);
     }
+}
+
+pub const KillProcessContext = struct {
+    state: DaemonState,
+    pid: std.os.pid_t,
+};
+
+pub const KillError = error{PermissionDenied} || UnexpectedError;
+
+// TODO maybe pr this back to zig
+pub fn kill(pid: std.os.pid_t, sig: u8) KillError!void {
+    switch (errno(std.os.system.kill(pid, sig))) {
+        0 => return,
+        std.os.EINVAL => unreachable, // invalid signal
+        std.os.EPERM => return error.PermissionDenied,
+        std.os.ESRCH => return error.UnknownPID,
+        else => |err| return std.os.unexpectedErrno(err),
+    }
+}
+
+pub fn termThenKillProcess(ctx: KillProcessContext) !void {
+    var state = ctx.state;
+    const pid = ctx.pid;
+    try kill(pid, os.SIGTERM);
 }
 
 const PollFdList = std.ArrayList(os.pollfd);
