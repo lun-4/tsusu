@@ -268,50 +268,42 @@ fn readManyFromClient(
         );
         try state.addSupervisor(service.*, supervisor_thread);
         try state.writeServices(stream);
-    } else if (std.mem.startsWith(u8, message, "stop")) {
+    } else if (std.mem.startsWith(u8, message, "signal")) {
         var parts_it = std.mem.split(message, ";");
         _ = parts_it.next();
 
         // TODO: error handling on malformed messages
         const service_name = parts_it.next().?;
+        const signal = try std.fmt.parseInt(u8, parts_it.next().?, 10);
 
         const kv_opt = state.services.get(service_name);
         if (kv_opt) |kv| {
             const service = kv.value;
             switch (service.state) {
                 .Running => |pid| {
-                    try kill(pid, os.SIGTERM);
+                    kill(pid, signal) catch |err| {
+                        if (err != error.UnknownPID) return err;
+                    };
                 },
                 else => {},
             }
         }
 
-        try state.writeServices(stream);
+        try stream.print("ack!", .{});
     }
 }
 
-pub const KillProcessContext = struct {
-    state: DaemonState,
-    pid: std.os.pid_t,
-};
-
-pub const KillError = error{PermissionDenied} || UnexpectedError;
+pub const KillError = error{ PermissionDenied, UnknownPID } || std.os.UnexpectedError;
 
 // TODO maybe pr this back to zig
 pub fn kill(pid: std.os.pid_t, sig: u8) KillError!void {
-    switch (errno(std.os.system.kill(pid, sig))) {
+    switch (std.os.errno(std.os.system.kill(pid, sig))) {
         0 => return,
         std.os.EINVAL => unreachable, // invalid signal
         std.os.EPERM => return error.PermissionDenied,
         std.os.ESRCH => return error.UnknownPID,
         else => |err| return std.os.unexpectedErrno(err),
     }
-}
-
-pub fn termThenKillProcess(ctx: KillProcessContext) !void {
-    var state = ctx.state;
-    const pid = ctx.pid;
-    try kill(pid, os.SIGTERM);
 }
 
 const PollFdList = std.ArrayList(os.pollfd);

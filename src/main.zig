@@ -177,16 +177,34 @@ pub fn printServices(msg: []const u8) !void {
     }
 }
 
-fn stopCommand(ctx: Context, in_stream: var, out_stream: var) !void {
-    const name = try (ctx.args_it.next(allocator) orelse @panic("expected name"));
-    std.debug.warn("sending stop '{}'\n", .{name});
-    try out_stream.print("stop;{}!", .{name});
+fn stopCommand(ctx: *Context, in_stream: var, out_stream: var) !void {
+    const name = try (ctx.args_it.next(ctx.allocator) orelse @panic("expected name"));
+    std.debug.warn("stopping '{}'\n", .{name});
 
-    std.time.sleep(1 * std.os.ns_per_s);
+    // First, we make the daemon send a SIGTERM to the child process.
+    // Then we wait 1 second, and try to send a SIGKILL. If the process is
+    // already dead, the UnknownPID error will be silently ignored.
 
-    const msg = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 1024);
-    defer ctx.allocator.free(msg);
-    try printServices(msg);
+    // After that, we issue a list command to see the current state of the
+    // services.
+
+    try out_stream.print("signal;{};{}!", .{ name, std.os.SIGTERM });
+    const term_ack = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 32);
+    defer ctx.allocator.free(term_ack);
+    std.debug.assert(std.mem.eql(u8, term_ack, "ack"));
+
+    std.time.sleep(1 * std.time.ns_per_s);
+
+    try out_stream.print("signal;{};{}!", .{ name, std.os.SIGKILL });
+    const kill_ack = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 32);
+    defer ctx.allocator.free(kill_ack);
+    std.debug.assert(std.mem.eql(u8, kill_ack, "ack"));
+
+    try out_stream.print("list!", .{});
+    const list_msg = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 1024);
+    defer ctx.allocator.free(list_msg);
+
+    try printServices(list_msg);
 }
 
 pub fn main() anyerror!void {
@@ -278,7 +296,7 @@ pub fn main() anyerror!void {
             try printServices(msg);
         },
 
-        .Stop => try stopCommand(ctx, in_stream, out_stream),
+        .Stop => try stopCommand(&ctx, in_stream, out_stream),
 
         else => std.debug.warn("TODO implement mode {}\n", .{mode}),
     }
