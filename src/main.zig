@@ -230,6 +230,10 @@ fn stopCommand(ctx: *Context, in_stream: var, out_stream: var) !void {
         }
     };
 
+    // Wait 250 milliseconds to give the system time to catch up on that
+    // SIGKILL and we have updated state.
+    std.time.sleep(250 * std.time.ns_per_ms);
+
     try out_stream.print("list!", .{});
     const list_msg = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 1024);
     defer ctx.allocator.free(list_msg);
