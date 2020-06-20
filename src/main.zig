@@ -197,7 +197,10 @@ fn stopCommand(ctx: *Context, in_stream: var, out_stream: var) !void {
     try out_stream.print("stop;{}!", .{name});
     const stop_ack = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 32);
     defer ctx.allocator.free(stop_ack);
-    std.debug.assert(std.mem.eql(u8, stop_ack, "ack!"));
+    if (!std.mem.eql(u8, stop_ack, "ack")) {
+        std.debug.warn("Expected ack message, got {}\n", .{stop_ack});
+        return error.UnexpectedMessage;
+    }
 
     var services_it = std.mem.split(reply, ";");
     const service_line = services_it.next().?;
