@@ -130,23 +130,29 @@ pub const DaemonState = struct {
         }
     }
 
+    fn writeService(
+        self: @This(),
+        stream: var,
+        key: []const u8,
+        service: *Service,
+    ) !void {
+        self.logger.info("serv: {} {}", .{ key, service.path });
+        try stream.print("{},", .{key});
+
+        const state_string = switch (service.state) {
+            .NotRunning => try stream.print("0", .{}),
+            .Running => |pid| try stream.print("1,{}", .{pid}),
+            .Stopped => |code| try stream.print("2,{}", .{code}),
+            .Restarting => |code| try stream.print("3,{}", .{code}),
+        };
+
+        try stream.print(";", .{});
+    }
+
     pub fn writeServices(self: @This(), stream: var) !void {
         var services_it = self.services.iterator();
         while (services_it.next()) |kv| {
-            self.logger.info("serv: {} {}", .{ kv.key, kv.value.path });
-
-            var buf: [50]u8 = undefined;
-
-            try stream.print("{},", .{kv.key});
-
-            const state_string = switch (kv.value.state) {
-                .NotRunning => try stream.print("0", .{}),
-                .Running => |pid| try stream.print("1,{}", .{pid}),
-                .Stopped => |code| try stream.print("2,{}", .{code}),
-                .Restarting => |code| try stream.print("3,{}", .{code}),
-            };
-
-            try stream.print(";", .{});
+            try self.writeService(stream, kv.key, kv.value);
         }
         _ = try stream.write("!");
     }
@@ -268,41 +274,20 @@ fn readManyFromClient(
         );
         try state.addSupervisor(service.*, supervisor_thread);
         try state.writeServices(stream);
-    } else if (std.mem.startsWith(u8, message, "signal")) {
+    } else if (std.mem.startsWith(u8, message, "service")) {
         var parts_it = std.mem.split(message, ";");
         _ = parts_it.next();
 
         // TODO: error handling on malformed messages
         const service_name = parts_it.next().?;
-        const signal = try std.fmt.parseInt(u8, parts_it.next().?, 10);
 
         const kv_opt = state.services.get(service_name);
         if (kv_opt) |kv| {
-            const service = kv.value;
-            switch (service.state) {
-                .Running => |pid| {
-                    kill(pid, signal) catch |err| {
-                        if (err != error.UnknownPID) return err;
-                    };
-                },
-                else => {},
-            }
+            try state.writeService(stream, kv.key, kv.value);
+            try stream.print("!", .{});
+        } else {
+            try stream.print("err unknown service!", .{});
         }
-
-        try stream.print("ack!", .{});
-    }
-}
-
-pub const KillError = error{ PermissionDenied, UnknownPID } || std.os.UnexpectedError;
-
-// TODO maybe pr this back to zig
-pub fn kill(pid: std.os.pid_t, sig: u8) KillError!void {
-    switch (std.os.errno(std.os.system.kill(pid, sig))) {
-        0 => return,
-        std.os.EINVAL => unreachable, // invalid signal
-        std.os.EPERM => return error.PermissionDenied,
-        std.os.ESRCH => return error.UnknownPID,
-        else => |err| return std.os.unexpectedErrno(err),
     }
 }
 

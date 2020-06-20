@@ -188,23 +188,54 @@ fn stopCommand(ctx: *Context, in_stream: var, out_stream: var) !void {
     // After that, we issue a list command to see the current state of the
     // services.
 
-    try out_stream.print("signal;{};{}!", .{ name, std.os.SIGTERM });
-    const term_ack = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 32);
-    defer ctx.allocator.free(term_ack);
-    std.debug.assert(std.mem.eql(u8, term_ack, "ack"));
+    try out_stream.print("service;{}!", .{name});
+    const reply = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 1024);
+    defer ctx.allocator.free(reply);
+
+    var services_it = std.mem.split(reply, ";");
+    const service_line = services_it.next().?;
+    var parts_it = std.mem.split(service_line, ",");
+    _ = parts_it.next();
+    const state_str = parts_it.next().?;
+    const state = try std.fmt.parseInt(u8, state_str, 10);
+
+    if (state != 1) {
+        std.debug.warn("service '{}' is not running.\n", .{name});
+    }
+
+    const pid = try std.fmt.parseInt(std.os.pid_t, parts_it.next().?, 10);
+
+    kill(pid, std.os.SIGTERM) catch |err| {
+        if (err == error.UnknownPID) {
+            std.debug.warn("Are we sure the service is running?", .{});
+        }
+        return err;
+    };
 
     std.time.sleep(1 * std.time.ns_per_s);
 
-    try out_stream.print("signal;{};{}!", .{ name, std.os.SIGKILL });
-    const kill_ack = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 32);
-    defer ctx.allocator.free(kill_ack);
-    std.debug.assert(std.mem.eql(u8, kill_ack, "ack"));
+    kill(pid, std.os.SIGKILL) catch |err| {
+        if (err != error.UnknownPID) {
+            return err;
+        }
+    };
 
     try out_stream.print("list!", .{});
     const list_msg = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 1024);
     defer ctx.allocator.free(list_msg);
-
     try printServices(list_msg);
+}
+pub const KillError = error{ PermissionDenied, UnknownPID } || std.os.UnexpectedError;
+
+// TODO maybe pr this back to zig
+pub fn kill(pid: std.os.pid_t, sig: u8) KillError!void {
+    switch (std.os.errno(std.os.system.kill(pid, sig))) {
+        0 => return,
+        std.os.EINVAL => unreachable, // invalid signal
+        std.os.EPERM => return error.PermissionDenied,
+        std.os.ESRCH => return error.UnknownPID,
+        else => |err| return std.os.unexpectedErrno(err),
+    }
 }
 
 pub fn main() anyerror!void {
