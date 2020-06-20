@@ -192,6 +192,13 @@ fn stopCommand(ctx: *Context, in_stream: var, out_stream: var) !void {
     const reply = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 1024);
     defer ctx.allocator.free(reply);
 
+    // signal that we are effectively stopping the service and that the
+    // supervisor should not restart it
+    try out_stream.print("stop;{}!", .{name});
+    const stop_ack = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 32);
+    defer ctx.allocator.free(stop_ack);
+    std.debug.assert(std.mem.eql(u8, stop_ack, "ack!"));
+
     var services_it = std.mem.split(reply, ";");
     const service_line = services_it.next().?;
     var parts_it = std.mem.split(service_line, ",");

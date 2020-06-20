@@ -25,7 +25,9 @@ pub fn superviseProcess(ctx: SupervisorContext) !void {
 
     state.logger.info("sup:{}: arg0 = {}\n", .{ ctx.service.name, argv.items[0] });
 
-    while (true) {
+    var kv = state.services.get(ctx.service.name).?;
+
+    while (!kv.value.stop_flag) {
         var proc = try std.ChildProcess.init(argv.items, allocator);
 
         try proc.spawn();

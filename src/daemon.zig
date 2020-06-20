@@ -21,6 +21,7 @@ pub const Service = struct {
     supervisor: ?*std.Thread = null,
 
     state: ServiceState = ServiceState{ .NotRunning = {} },
+    stop_flag: bool = false,
 };
 
 pub const ServiceMap = std.StringHashMap(*Service);
@@ -285,6 +286,20 @@ fn readManyFromClient(
         if (kv_opt) |kv| {
             try state.writeService(stream, kv.key, kv.value);
             try stream.print("!", .{});
+        } else {
+            try stream.print("err unknown service!", .{});
+        }
+    } else if (std.mem.startsWith(u8, message, "stop")) {
+        var parts_it = std.mem.split(message, ";");
+        _ = parts_it.next();
+
+        // TODO: error handling on malformed messages
+        const service_name = parts_it.next().?;
+
+        const kv_opt = state.services.get(service_name);
+        if (kv_opt) |kv| {
+            kv.value.stop_flag = true;
+            try stream.print("ack!", .{});
         } else {
             try stream.print("err unknown service!", .{});
         }
