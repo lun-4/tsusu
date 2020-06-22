@@ -3,6 +3,8 @@ const daemon = @import("daemon.zig");
 
 const DaemonState = daemon.DaemonState;
 const ServiceDecl = daemon.ServiceDecl;
+const Service = daemon.Service;
+const ServiceStateType = daemon.ServiceStateType;
 
 pub const SupervisorContext = struct {
     state: *DaemonState,
@@ -56,4 +58,63 @@ pub fn superviseProcess(ctx: SupervisorContext) !void {
 
         std.time.sleep(5 * std.time.ns_per_s);
     }
+}
+
+pub const KillServiceContext = struct {
+    state: *DaemonState,
+    service: *const Service,
+    stream: daemon.OutStream,
+};
+
+pub const KillError = error{ PermissionDenied, UnknownPID } || std.os.UnexpectedError;
+
+// TODO maybe pr this back to zig
+pub fn kill(pid: std.os.pid_t, sig: u8) KillError!void {
+    switch (std.os.errno(std.os.system.kill(pid, sig))) {
+        0 => return,
+        std.os.EINVAL => unreachable, // invalid signal
+        std.os.EPERM => return error.PermissionDenied,
+        std.os.ESRCH => return error.UnknownPID,
+        else => |err| return std.os.unexpectedErrno(err),
+    }
+}
+
+pub fn killService(ctx: KillServiceContext) !void {
+    var state = ctx.state;
+    var allocator = ctx.state.allocator;
+    const service = ctx.service;
+    var stream = ctx.stream;
+
+    // try stream.print("ack!", .{});
+
+    // std.debug.assert(@as(ServiceStateType, service.state) == .Running);
+    const pid = service.state.Running;
+
+    // First, we make the daemon send a SIGTERM to the child process.
+    // Then we wait 1 second, and try to send a SIGKILL. If the process is
+    // already dead, the UnknownPID error will be silently ignored.
+
+    kill(pid, std.os.SIGTERM) catch |err| {
+        if (err == error.UnknownPID) {
+            try stream.print("err pid not found for SIGTERM!", .{});
+            return;
+        }
+
+        return err;
+    };
+
+    std.time.sleep(1 * std.time.ns_per_s);
+
+    // UnknownPID errors here must be silenced.
+    kill(pid, std.os.SIGKILL) catch |err| {
+        if (err != error.UnknownPID) {
+            return err;
+        }
+    };
+
+    // Wait 250 milliseconds to give the system time to catch up on that
+    // SIGKILL and we have updated state.
+    std.time.sleep(250 * std.time.ns_per_ms);
+
+    try state.writeServices(stream);
 }

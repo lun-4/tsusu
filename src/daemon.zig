@@ -9,7 +9,17 @@ const supervisors = @import("supervisor.zig");
 const superviseProcess = supervisors.superviseProcess;
 const SupervisorContext = supervisors.SupervisorContext;
 
-pub const ServiceState = union(enum) {
+const killService = supervisors.killService;
+const KillServiceContext = supervisors.KillServiceContext;
+
+pub const ServiceStateType = enum(u8) {
+    NotRunning,
+    Running,
+    Restarting,
+    Stopped,
+};
+
+pub const ServiceState = union(ServiceStateType) {
     NotRunning: void,
     Running: std.os.pid_t,
     Restarting: u32,
@@ -226,6 +236,8 @@ pub const DaemonState = struct {
     }
 };
 
+pub const OutStream = std.io.OutStream(std.fs.File, std.fs.File.WriteError, std.fs.File.write);
+
 fn readManyFromClient(
     state: *DaemonState,
     pollfd: os.pollfd,
@@ -234,7 +246,7 @@ fn readManyFromClient(
     var allocator = state.allocator;
     var sock = std.fs.File{ .handle = pollfd.fd };
     var in_stream = sock.inStream();
-    var stream = sock.outStream();
+    var stream: OutStream = sock.outStream();
 
     const message = try in_stream.readUntilDelimiterAlloc(allocator, '!', 1024);
     errdefer allocator.free(message);
@@ -299,7 +311,19 @@ fn readManyFromClient(
         const kv_opt = state.services.get(service_name);
         if (kv_opt) |kv| {
             kv.value.stop_flag = true;
-            try stream.print("ack!", .{});
+
+            switch (kv.value.state) {
+                .Running => {},
+                else => {
+                    try stream.print("err service not running!", .{});
+                    return;
+                },
+            }
+
+            const kill_thread = try std.Thread.spawn(
+                KillServiceContext{ .state = state, .service = kv.value, .stream = stream },
+                killService,
+            );
         } else {
             try stream.print("err unknown service!", .{});
         }

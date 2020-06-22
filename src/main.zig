@@ -181,75 +181,10 @@ fn stopCommand(ctx: *Context, in_stream: var, out_stream: var) !void {
     const name = try (ctx.args_it.next(ctx.allocator) orelse @panic("expected name"));
     std.debug.warn("stopping '{}'\n", .{name});
 
-    // First, we make the daemon send a SIGTERM to the child process.
-    // Then we wait 1 second, and try to send a SIGKILL. If the process is
-    // already dead, the UnknownPID error will be silently ignored.
-
-    // After that, we issue a list command to see the current state of the
-    // services.
-
-    try out_stream.print("service;{}!", .{name});
-    const reply = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 1024);
-    defer ctx.allocator.free(reply);
-
-    // signal that we are effectively stopping the service and that the
-    // supervisor should not restart it
     try out_stream.print("stop;{}!", .{name});
-    const stop_ack = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 32);
-    defer ctx.allocator.free(stop_ack);
-    if (!std.mem.eql(u8, stop_ack, "ack")) {
-        std.debug.warn("Expected ack message, got {}\n", .{stop_ack});
-        return error.UnexpectedMessage;
-    }
-
-    var services_it = std.mem.split(reply, ";");
-    const service_line = services_it.next().?;
-    var parts_it = std.mem.split(service_line, ",");
-    _ = parts_it.next();
-    const state_str = parts_it.next().?;
-    const state = try std.fmt.parseInt(u8, state_str, 10);
-
-    if (state != 1) {
-        std.debug.warn("service '{}' is not running.\n", .{name});
-    }
-
-    const pid = try std.fmt.parseInt(std.os.pid_t, parts_it.next().?, 10);
-
-    kill(pid, std.os.SIGTERM) catch |err| {
-        if (err == error.UnknownPID) {
-            std.debug.warn("Are we sure the service is running?", .{});
-        }
-        return err;
-    };
-
-    std.time.sleep(1 * std.time.ns_per_s);
-
-    kill(pid, std.os.SIGKILL) catch |err| {
-        if (err != error.UnknownPID) {
-            return err;
-        }
-    };
-
-    // Wait 250 milliseconds to give the system time to catch up on that
-    // SIGKILL and we have updated state.
-    std.time.sleep(250 * std.time.ns_per_ms);
-
-    try out_stream.print("list!", .{});
     const list_msg = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 1024);
     defer ctx.allocator.free(list_msg);
     try printServices(list_msg);
-}
-pub const KillError = error{ PermissionDenied, UnknownPID } || std.os.UnexpectedError;
-
-// TODO maybe pr this back to zig
-pub fn kill(pid: std.os.pid_t, sig: u8) KillError!void {
-    switch (std.os.errno(std.os.system.kill(pid, sig))) {
-        0 => return,
-        std.os.EINVAL => unreachable, // invalid signal
-        std.os.EPERM => return error.PermissionDenied,
-        std.os.ESRCH => return error.UnknownPID,
-        else => |err| return std.os.unexpectedErrno(err),
-    }
 }
 
 pub fn main() anyerror!void {
