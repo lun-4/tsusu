@@ -23,14 +23,14 @@ pub fn watchService(ctx: WatchServiceContext) !void {
     // spawn two threads that write to the stream for each
     // file descriptor
 
-    try std.Thread.spawn(SpecificWatchServiceContext{
+    _ = try std.Thread.spawn(SpecificWatchServiceContext{
         .state = state,
         .prefix = "stdout",
         .in_file = stdout,
         .client = ctx.client,
     }, specificWatchService);
 
-    try std.Thread.spawn(SpecificWatchServiceContext{
+    _ = try std.Thread.spawn(SpecificWatchServiceContext{
         .state = state,
         .prefix = "stderr",
         .in_file = stderr,

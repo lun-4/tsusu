@@ -361,7 +361,7 @@ fn readManyFromClient(
                 },
             }
 
-            try std.Thread.spawn(
+            _ = try std.Thread.spawn(
                 KillServiceContext{ .state = state, .service = kv.value, .stream = stream },
                 killService,
             );
