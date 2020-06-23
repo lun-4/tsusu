@@ -23,16 +23,16 @@ pub fn watchService(ctx: WatchServiceContext) !void {
     // spawn two threads that write to the stream for each
     // file descriptor
 
-    // XXX: lock on the out stream so those threads cant corrupt eachother
-
     try std.Thread.spawn(SpecificWatchServiceContext{
         .state = state,
+        .prefix = "stdout",
         .in_file = stdout,
         .client = ctx.client,
     }, specificWatchService);
 
     try std.Thread.spawn(SpecificWatchServiceContext{
         .state = state,
+        .prefix = "stderr",
         .in_file = stderr,
         .client = ctx.client,
     }, specificWatchService);
@@ -40,6 +40,7 @@ pub fn watchService(ctx: WatchServiceContext) !void {
 
 pub const SpecificWatchServiceContext = struct {
     state: *DaemonState,
+    prefix: []const u8,
     service: *Service,
     client: *Client,
 };
@@ -61,6 +62,6 @@ fn specificWatchService(ctx: SpecificWatchServiceContext) !void {
         var buf: [512]u8 = undefined;
         const bytecount = try duped_stream.read(&buf);
         const stream_data = buf[0..bytecount];
-        _ = try ctx.client.write(stream_data);
+        try ctx.client.print("data;{};{};{}!", .{ ctx.service.name, ctx.prefix, stream_data });
     }
 }

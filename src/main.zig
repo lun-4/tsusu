@@ -122,6 +122,7 @@ pub const Mode = enum {
     Help,
     List,
     Noop,
+    Logs,
 };
 
 fn getMode(mode_arg: []const u8) !Mode {
@@ -131,6 +132,7 @@ fn getMode(mode_arg: []const u8) !Mode {
     if (std.mem.eql(u8, mode_arg, "stop")) return .Stop;
     if (std.mem.eql(u8, mode_arg, "help")) return .Help;
     if (std.mem.eql(u8, mode_arg, "list")) return .List;
+    if (std.mem.eql(u8, mode_arg, "logs")) return .Logs;
     return error.UnknownMode;
 }
 
@@ -185,6 +187,18 @@ fn stopCommand(ctx: *Context, in_stream: var, out_stream: var) !void {
     const list_msg = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 1024);
     defer ctx.allocator.free(list_msg);
     try printServices(list_msg);
+}
+
+fn watchCommand(ctx: *Context, in_stream: var, out_stream: var) !void {
+    const name = try (ctx.args_it.next(ctx.allocator) orelse @panic("expected name"));
+    std.debug.warn("stopping '{}'\n", .{name});
+
+    try out_stream.print("logs;{}!", .{name});
+    while (true) {
+        const msg = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 1024);
+        defer ctx.allocator.free(msg);
+        std.debug.warn("msg: '{}'\n", .{msg});
+    }
 }
 
 pub fn main() anyerror!void {
@@ -277,6 +291,7 @@ pub fn main() anyerror!void {
         },
 
         .Stop => try stopCommand(&ctx, in_stream, out_stream),
+        .Logs => try watchCommand(&ctx, in_stream, out_stream),
 
         else => std.debug.warn("TODO implement mode {}\n", .{mode}),
     }

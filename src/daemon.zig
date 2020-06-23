@@ -35,6 +35,7 @@ pub const ServiceState = union(ServiceStateType) {
 };
 
 pub const Service = struct {
+    name: []const u8,
     path: []const u8,
     supervisor: ?*std.Thread = null,
 
@@ -183,8 +184,12 @@ pub const DaemonState = struct {
 
     pub fn addSupervisor(self: *@This(), service: ServiceDecl, thread: *std.Thread) !void {
         var service_ptr = try self.allocator.create(Service);
-        service_ptr.* =
-            .{ .path = service.cmdline, .supervisor = thread };
+        service_ptr.* = .{
+            .name = service.name,
+            .path = service.cmdline,
+            .supervisor = thread,
+        };
+
         _ = try self.services.put(
             service.name,
             service_ptr,
@@ -265,6 +270,8 @@ fn readManyFromClient(
     var in_stream = sock.inStream();
     var stream: OutStream = sock.outStream();
 
+    // yes, no freeing here
+    // it'll be fine, i promise :))))
     var client = try allocator.create(Client);
     client.* = Client.init(stream);
 
@@ -284,6 +291,7 @@ fn readManyFromClient(
         _ = parts_it.next();
 
         // TODO: error handling on malformed messages
+        // TODO maybe some refcounting magic could go here
         const service_name = parts_it.next().?;
         const service_cmdline = parts_it.next().?;
         logger.info("got service start: {} {}", .{ service_name, service_cmdline });

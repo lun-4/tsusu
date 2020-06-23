@@ -7,3 +7,5 @@ zig-cache/
 
 /target
 **/*.rs.bk
+
+/periodic_message*
