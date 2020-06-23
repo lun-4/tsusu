@@ -19,9 +19,11 @@ pub const ServiceStateType = enum(u8) {
     Stopped,
 };
 
+pub const RunningState = struct { pid: std.os.pid_t };
+
 pub const ServiceState = union(ServiceStateType) {
     NotRunning: void,
-    Running: std.os.pid_t,
+    Running: RunningState,
     Restarting: u32,
     Stopped: u32,
 };
@@ -157,7 +159,7 @@ pub const DaemonState = struct {
 
         const state_string = switch (service.state) {
             .NotRunning => try stream.print("0", .{}),
-            .Running => |pid| try stream.print("1,{}", .{pid}),
+            .Running => |data| try stream.print("1,{}", .{data.pid}),
             .Stopped => |code| try stream.print("2,{}", .{code}),
             .Restarting => |code| try stream.print("3,{}", .{code}),
         };
@@ -197,7 +199,11 @@ pub const DaemonState = struct {
 
                 const pid = try deserializer.deserialize(std.os.pid_t);
                 self.logger.info("serivce {} started on pid {}", .{ service_name, pid });
-                self.services.get(service_name).?.value.state = ServiceState{ .Running = pid };
+                self.services.get(service_name).?.value.state = ServiceState{
+                    .Running = RunningState{
+                        .pid = pid,
+                    },
+                };
             },
 
             .ServiceExited => {
