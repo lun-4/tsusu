@@ -22,6 +22,8 @@ pub fn watchService(ctx: WatchServiceContext) !void {
     // spawn two threads that write to the stream for each
     // file descriptor
 
+    // XXX: lock on the out stream so those threads cant corrupt eachother
+
     try std.Thread.spawn(SpecificWatchServiceContext{
         .state = state,
         .in_file = stdout,
