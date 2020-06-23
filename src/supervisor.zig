@@ -96,7 +96,7 @@ pub fn killService(ctx: KillServiceContext) !void {
     // try stream.print("ack!", .{});
 
     // std.debug.assert(@as(ServiceStateType, service.state) == .Running);
-    const pid = service.state.Running;
+    const pid = service.state.Running.pid;
 
     // First, we make the daemon send a SIGTERM to the child process.
     // Then we wait 1 second, and try to send a SIGKILL. If the process is
