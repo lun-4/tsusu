@@ -43,7 +43,12 @@ pub const MessageOP = enum(u8) {
 };
 
 pub const Message = union(MessageOP) {
-    ServiceStarted: struct { name: []const u8, pid: std.os.pid_t },
+    ServiceStarted: struct {
+        name: []const u8,
+        pid: std.os.pid_t,
+        stdout: std.fs.File,
+        stderr: std.fs.File,
+    },
     ServiceExited: struct { name: []const u8, exit_code: u32 },
 };
 

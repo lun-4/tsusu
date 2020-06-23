@@ -32,10 +32,18 @@ pub fn superviseProcess(ctx: SupervisorContext) !void {
     while (!kv.value.stop_flag) {
         var proc = try std.ChildProcess.init(argv.items, allocator);
 
+        proc.stdout_behavior = .Pipe;
+        proc.stderr_behavior = .Pipe;
+
         try proc.spawn();
 
         state.pushMessage(.{
-            .ServiceStarted = .{ .name = ctx.service.name, .pid = proc.pid },
+            .ServiceStarted = .{
+                .name = ctx.service.name,
+                .pid = proc.pid,
+                .stdout = proc.stdout.?,
+                .stderr = proc.stderr.?,
+            },
         }) catch |err| {
             state.logger.info("Failed to send started message to daemon.", .{});
         };
