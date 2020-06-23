@@ -16,6 +16,8 @@ const KillServiceContext = supervisors.KillServiceContext;
 const WatchServiceContext = thread_commands.WatchServiceContext;
 const watchService = thread_commands.watchService;
 
+const Client = @import("client.zig").Client;
+
 pub const ServiceStateType = enum(u8) {
     NotRunning,
     Running,
@@ -263,6 +265,9 @@ fn readManyFromClient(
     var in_stream = sock.inStream();
     var stream: OutStream = sock.outStream();
 
+    var client = try allocator.create(Client);
+    client.* = Client.init(stream);
+
     const message = try in_stream.readUntilDelimiterAlloc(allocator, '!', 1024);
     errdefer allocator.free(message);
 
@@ -365,6 +370,7 @@ fn readManyFromClient(
                 WatchServiceContext{
                     .state = state,
                     .service = kv.value,
+                    .client = client,
                 },
                 watchService,
             );

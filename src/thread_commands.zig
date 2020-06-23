@@ -5,11 +5,12 @@ const DaemonState = daemon.DaemonState;
 const ServiceDecl = daemon.ServiceDecl;
 const Service = daemon.Service;
 const ServiceStateType = daemon.ServiceStateType;
+const Client = @import("client.zig").Client;
 
 pub const WatchServiceContext = struct {
     state: *DaemonState,
     service: *Service,
-    stream: daemon.OutStream,
+    client: *Client,
 };
 
 pub fn watchService(ctx: WatchServiceContext) !void {
@@ -27,20 +28,20 @@ pub fn watchService(ctx: WatchServiceContext) !void {
     try std.Thread.spawn(SpecificWatchServiceContext{
         .state = state,
         .in_file = stdout,
-        .stream = stream,
+        .client = ctx.client,
     }, specificWatchService);
 
     try std.Thread.spawn(SpecificWatchServiceContext{
         .state = state,
         .in_file = stderr,
-        .stream = stream,
+        .client = ctx.client,
     }, specificWatchService);
 }
 
 pub const SpecificWatchServiceContext = struct {
     state: *DaemonState,
     service: *Service,
-    stream: daemon.OutStream,
+    client: *Client,
 };
 
 fn specificWatchService(ctx: SpecificWatchServiceContext) !void {
@@ -60,6 +61,6 @@ fn specificWatchService(ctx: SpecificWatchServiceContext) !void {
         var buf: [512]u8 = undefined;
         const bytecount = try duped_stream.read(&buf);
         const stream_data = buf[0..bytecount];
-        _ = try ctx.stream.write(stream_data);
+        _ = try ctx.client.write(stream_data);
     }
 }
