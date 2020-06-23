@@ -25,7 +25,11 @@ pub const ServiceStateType = enum(u8) {
     Stopped,
 };
 
-pub const RunningState = struct { pid: std.os.pid_t };
+pub const RunningState = struct {
+    pid: std.os.pid_t,
+    stdout: std.os.fd_t,
+    stderr: std.os.fd_t,
+};
 
 pub const ServiceState = union(ServiceStateType) {
     NotRunning: void,
@@ -147,6 +151,8 @@ pub const DaemonState = struct {
             .ServiceStarted => |data| {
                 try serializeString(&serializer, data.name);
                 try serializer.serialize(data.pid);
+                try serializer.serialize(data.stdout.handle);
+                try serializer.serialize(data.stderr.handle);
             },
             .ServiceExited => |data| {
                 try serializeString(&serializer, data.name);
@@ -209,10 +215,17 @@ pub const DaemonState = struct {
                 defer self.allocator.free(service_name);
 
                 const pid = try deserializer.deserialize(std.os.pid_t);
-                self.logger.info("serivce {} started on pid {}", .{ service_name, pid });
+                const stdout = try deserializer.deserialize(std.os.fd_t);
+                const stderr = try deserializer.deserialize(std.os.fd_t);
+                self.logger.info(
+                    "serivce {} started on pid {} stdout={} stderr={}",
+                    .{ service_name, pid, stdout, stderr },
+                );
                 self.services.get(service_name).?.value.state = ServiceState{
                     .Running = RunningState{
                         .pid = pid,
+                        .stdout = stdout,
+                        .stderr = stderr,
                     },
                 };
             },
