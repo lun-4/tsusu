@@ -387,7 +387,7 @@ fn readManyFromClient(
                 },
             }
 
-            try std.Thread.spawn(
+            _ = try std.Thread.spawn(
                 WatchServiceContext{
                     .state = state,
                     .service = kv.value,

@@ -25,15 +25,17 @@ pub fn watchService(ctx: WatchServiceContext) !void {
 
     _ = try std.Thread.spawn(SpecificWatchServiceContext{
         .state = state,
+        .service = service,
         .prefix = "stdout",
-        .in_file = stdout,
+        .in_fd = stdout,
         .client = ctx.client,
     }, specificWatchService);
 
     _ = try std.Thread.spawn(SpecificWatchServiceContext{
         .state = state,
+        .service = service,
         .prefix = "stderr",
-        .in_file = stderr,
+        .in_fd = stderr,
         .client = ctx.client,
     }, specificWatchService);
 }
@@ -43,14 +45,16 @@ pub const SpecificWatchServiceContext = struct {
     prefix: []const u8,
     service: *Service,
     client: *Client,
+    in_fd: std.os.fd_t,
 };
 
 fn specificWatchService(ctx: SpecificWatchServiceContext) !void {
-    // XXX: construct the wanted memfd id via service data
-    const new_fd = std.os.memfd_create("test", 0);
+    var buf: [128]u8 = undefined;
+    const fd_name = try std.fmt.bufPrint(&buf, "{}_{}", .{ ctx.service, ctx.prefix });
+    const new_fd = try std.os.memfd_create(fd_name, 0);
 
     // TODO: handle resource errors here
-    try std.os.dup2(ctx.in_file.handle, new_fd);
+    try std.os.dup2(ctx.in_fd, new_fd);
 
     var duped_stream = std.fs.File{ .handle = new_fd };
     defer duped_stream.close();
