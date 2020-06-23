@@ -5,12 +5,16 @@ const Logger = @import("logger.zig").Logger;
 const helpers = @import("helpers.zig");
 
 const supervisors = @import("supervisor.zig");
+const thread_commands = @import("thread_commands.zig");
 
 const superviseProcess = supervisors.superviseProcess;
 const SupervisorContext = supervisors.SupervisorContext;
 
 const killService = supervisors.killService;
 const KillServiceContext = supervisors.KillServiceContext;
+
+const WatchServiceContext = thread_commands.WatchServiceContext;
+const watchService = thread_commands.watchService;
 
 pub const ServiceStateType = enum(u8) {
     NotRunning,
@@ -331,9 +335,38 @@ fn readManyFromClient(
                 },
             }
 
-            const kill_thread = try std.Thread.spawn(
+            try std.Thread.spawn(
                 KillServiceContext{ .state = state, .service = kv.value, .stream = stream },
                 killService,
+            );
+        } else {
+            try stream.print("err unknown service!", .{});
+        }
+    } else if (std.mem.startsWith(u8, message, "logs")) {
+        var parts_it = std.mem.split(message, ";");
+        _ = parts_it.next();
+
+        // TODO: error handling on malformed messages
+        const service_name = parts_it.next().?;
+
+        const kv_opt = state.services.get(service_name);
+        if (kv_opt) |kv| {
+            kv.value.stop_flag = true;
+
+            switch (kv.value.state) {
+                .Running => {},
+                else => {
+                    try stream.print("err service not running!", .{});
+                    return;
+                },
+            }
+
+            try std.Thread.spawn(
+                WatchServiceContext{
+                    .state = state,
+                    .service = kv.value,
+                },
+                watchService,
             );
         } else {
             try stream.print("err unknown service!", .{});
