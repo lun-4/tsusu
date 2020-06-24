@@ -16,7 +16,9 @@ const KillServiceContext = thread_commands.KillServiceContext;
 const WatchServiceContext = thread_commands.WatchServiceContext;
 const watchService = thread_commands.watchService;
 
+const Rc = @import("rc.zig").Rc;
 const Client = @import("client.zig").Client;
+const RcClient = Rc(Client);
 
 pub const ServiceStateType = enum(u8) {
     NotRunning,
@@ -283,10 +285,11 @@ fn readManyFromClient(
     var in_stream = sock.inStream();
     var stream: OutStream = sock.outStream();
 
-    // yes, no freeing here
-    // it'll be fine, i promise :))))
-    var client = try allocator.create(Client);
-    client.* = Client.init(stream);
+    // no freeing is done of the client wrapper struct, as it manages
+    // its own memory via refcounting, as this struct can be passed around
+    // many threads
+    var client = RcClient.init(allocator);
+    var client = try Client.init(allocator, stream);
 
     const message = try in_stream.readUntilDelimiterAlloc(allocator, '!', 1024);
     errdefer allocator.free(message);

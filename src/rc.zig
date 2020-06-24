@@ -40,7 +40,14 @@ pub fn Rc(comptime T: type) type {
 
         pub fn deinit(self: *Self) void {
             self.refs.set(0);
-            self.allocator.destroy(self.ptr.?);
+
+            // pointer may want to do its own stuff
+            if (self.ptr) |ptr| {
+                // TODO only call if @hasDecl(T, "deinit") returns true
+                ptr.deinit();
+                self.allocator.destroy(self.ptr);
+            }
+
             self.ptr = null;
         }
 
