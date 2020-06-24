@@ -98,12 +98,7 @@ pub const Context = struct {
             logger.info("Failed to dup2 stderr to logfile: {}", .{err});
         };
 
-        daemon.main(&logger) catch |err| {
-            logger.info("had error: {}", .{@errorName(err)});
-            if (@errorReturnTrace()) |trace| {
-                logger.printTrace(trace.*);
-            }
-        };
+        try daemon.main(&logger);
     }
 };
 

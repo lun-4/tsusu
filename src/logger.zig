@@ -26,22 +26,5 @@ pub fn Logger(OutStream: var) type {
             };
             _ = self.stream.write("\n") catch |err| {};
         }
-
-        pub fn printTrace(self: *@This(), stack_trace: std.builtin.StackTrace) void {
-            if (std.builtin.strip_debug_info) {
-                self.stream.print("Unable to dump stack trace: debug info stripped\n", .{}) catch return;
-                return;
-            }
-
-            const debug_info = std.debug.getSelfDebugInfo() catch |err| {
-                self.stream.print("Unable to dump stack trace: Unable to open debug info: {}\n", .{@errorName(err)}) catch return;
-                return;
-            };
-
-            std.debug.writeStackTrace(stack_trace, self.stream, std.heap.page_allocator, debug_info, std.debug.detectTTYConfig()) catch |err| {
-                self.stream.print("Unable to dump stack trace: {}\n", .{@errorName(err)}) catch return;
-                return;
-            };
-        }
     };
 }
