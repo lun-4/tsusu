@@ -85,7 +85,7 @@ pub fn watchService(ctx: WatchServiceContext) !void {
     _ = try std.Thread.spawn(SpecificWatchServiceContext{
         .state = state,
         .service = service,
-        .prefix = "stdout",
+        .typ = .Out,
         .in_fd = stdout,
         .client = ctx.client,
     }, specificWatchService);
@@ -93,15 +93,17 @@ pub fn watchService(ctx: WatchServiceContext) !void {
     _ = try std.Thread.spawn(SpecificWatchServiceContext{
         .state = state,
         .service = service,
-        .prefix = "stderr",
+        .typ = .Err,
         .in_fd = stderr,
         .client = ctx.client,
     }, specificWatchService);
 }
 
+pub const SpecificWatchType = enum { Out, Err };
+
 pub const SpecificWatchServiceContext = struct {
     state: *DaemonState,
-    prefix: []const u8,
+    typ: SpecificWatchType,
     service: *Service,
     client: *Client,
     in_fd: std.os.fd_t,
@@ -109,7 +111,11 @@ pub const SpecificWatchServiceContext = struct {
 
 fn specificWatchService(ctx: SpecificWatchServiceContext) !void {
     var buf: [128]u8 = undefined;
-    const fd_name = try std.fmt.bufPrint(&buf, "{}_{}", .{ ctx.service, ctx.prefix });
+    const prefix = switch (ctx.typ) {
+        .Out => "stdout",
+        .Err => "stderr",
+    };
+    const fd_name = try std.fmt.bufPrint(&buf, "{}_{}", .{ ctx.service.name, prefix });
     const new_fd = try std.os.memfd_create(fd_name, 0);
 
     // TODO: handle resource errors here
@@ -125,6 +131,6 @@ fn specificWatchService(ctx: SpecificWatchServiceContext) !void {
         var line_buf: [512]u8 = undefined;
         const bytecount = try duped_stream.read(&line_buf);
         const stream_data = line_buf[0..bytecount];
-        try ctx.client.print("data;{};{};{}!", .{ ctx.service.name, ctx.prefix, stream_data });
+        try ctx.client.print("data;{};{};{}!", .{ ctx.service.name, prefix, stream_data });
     }
 }
