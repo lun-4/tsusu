@@ -89,6 +89,15 @@ pub const Context = struct {
         std.os.close(std.os.STDIN_FILENO);
         std.os.close(std.os.STDOUT_FILENO);
         std.os.close(std.os.STDERR_FILENO);
+
+        // redirect stdout and stderr to logfile
+        std.os.dup2(logfile.handle, std.os.STDOUT_FILENO) catch |err| {
+            logger.info("Failed to dup2 stdout to logfile: {}", .{err});
+        };
+        std.os.dup2(logfile.handle, std.os.STDERR_FILENO) catch |err| {
+            logger.info("Failed to dup2 stderr to logfile: {}", .{err});
+        };
+
         daemon.main(&logger) catch |err| {
             logger.info("had error: {}", .{@errorName(err)});
             if (@errorReturnTrace()) |trace| {
@@ -191,7 +200,7 @@ fn stopCommand(ctx: *Context, in_stream: var, out_stream: var) !void {
 
 fn watchCommand(ctx: *Context, in_stream: var, out_stream: var) !void {
     const name = try (ctx.args_it.next(ctx.allocator) orelse @panic("expected name"));
-    std.debug.warn("stopping '{}'\n", .{name});
+    std.debug.warn("watching '{}'\n", .{name});
 
     try out_stream.print("logs;{}!", .{name});
     while (true) {

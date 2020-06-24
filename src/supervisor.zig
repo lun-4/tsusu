@@ -45,8 +45,13 @@ pub fn superviseProcess(ctx: SupervisorContext) !void {
                 .stderr = proc.stderr.?,
             },
         }) catch |err| {
-            state.logger.info("Failed to send started message to daemon.", .{});
+            state.logger.info("Failed to send started message to daemon: {}", .{err});
         };
+
+        // XXX: spawn threads for logging of stderr and stdout
+        //_ = std.Thread.spawn(ServiceLogger.Context{}, ServiceLogger.handler) catch |err| {
+        //    state.logger.info("Failed to start stdout thread: {}", .{err});
+        //};
 
         const term_result = try proc.wait();
 
