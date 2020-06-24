@@ -10,8 +10,8 @@ const thread_commands = @import("thread_commands.zig");
 const superviseProcess = supervisors.superviseProcess;
 const SupervisorContext = supervisors.SupervisorContext;
 
-const killService = supervisors.killService;
-const KillServiceContext = supervisors.KillServiceContext;
+const killService = thread_commands.killService;
+const KillServiceContext = thread_commands.KillServiceContext;
 
 const WatchServiceContext = thread_commands.WatchServiceContext;
 const watchService = thread_commands.watchService;
