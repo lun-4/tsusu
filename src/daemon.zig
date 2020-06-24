@@ -409,7 +409,7 @@ fn sigemptyset(set: *std.os.sigset_t) void {
     }
 }
 
-fn readFromSignalFd(signal_fd: std.os.fd_t) !void {
+fn readFromSignalFd(allocator: *std.mem.Allocator, logger: *FileLogger, signal_fd: std.os.fd_t) !void {
     var buf: [@sizeOf(os.linux.signalfd_siginfo)]u8 align(8) = undefined;
     _ = try os.read(signal_fd, &buf);
 
@@ -431,8 +431,8 @@ fn readFromSignalFd(signal_fd: std.os.fd_t) !void {
 
     logger.info("got SIGINT or SIGTERM, stopping!", .{});
 
-    const pidpath = try helpers.getPathFor(state.allocator, .Pid);
-    const sockpath = try helpers.getPathFor(state.allocator, .Sock);
+    const pidpath = try helpers.getPathFor(allocator, .Pid);
+    const sockpath = try helpers.getPathFor(allocator, .Sock);
 
     std.os.unlink(pidpath) catch |err| {
         logger.info("failed to delete pid file: {}", .{err});
@@ -444,20 +444,29 @@ fn readFromSignalFd(signal_fd: std.os.fd_t) !void {
     return error.Shutdown;
 }
 
-fn handleNewClient(server: *std.net.StreamServer, sockets: *PollFdList) !void {
-    var conn = try server.accept();
+fn handleNewClient(logger: *FileLogger, server: *std.net.StreamServer, sockets: *PollFdList) void {
+    var conn = server.accept() catch |err| {
+        logger.info("Failed to accept: {}", .{err});
+        return;
+    };
+
     var sock = conn.file;
+
+    _ = sock.write("helo!") catch |err| {
+        logger.info("Failed to send helo: {}", .{err});
+        return;
+    };
 
     sockets.append(os.pollfd{
         .fd = sock.handle,
         .events = os.POLLIN,
         .revents = 0,
     }) catch |err| {
-        _ = try sock.write("err out of memory!");
-        return;
+        _ = sock.write("err out of memory!") catch |err| {
+            logger.info("Failed to send OOM message: {}", .{err});
+        };
     };
 
-    _ = try sock.write("helo!");
     return;
 }
 
@@ -524,9 +533,9 @@ pub fn main(logger: *FileLogger) anyerror!void {
             //if (pollfd.revents != os.POLLIN) return error.UnexpectedSocketRevents;
 
             if (pollfd.fd == server.sockfd.?) {
-                handleNewClient(&server, &sockets);
+                handleNewClient(logger, &server, &sockets);
             } else if (pollfd.fd == signal_fd) {
-                readFromSignalFd(signal_fd) catch |err| {
+                readFromSignalFd(state.allocator, logger, signal_fd) catch |err| {
                     if (err == error.Shutdown) return else logger.info("failed to read from signal fd: {}\n", .{err});
                 };
             } else {
