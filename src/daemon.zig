@@ -18,7 +18,7 @@ const watchService = thread_commands.watchService;
 
 const Rc = @import("rc.zig").Rc;
 const Client = @import("client.zig").Client;
-const RcClient = Rc(Client);
+pub const RcClient = Rc(Client);
 
 pub const ServiceStateType = enum(u8) {
     NotRunning,
@@ -288,10 +288,12 @@ fn readManyFromClient(
     // no freeing is done of the client wrapper struct, as it manages
     // its own memory via refcounting, as this struct can be passed around
     // many threads
-    var client = RcClient.init(allocator);
-    var client = try Client.init(allocator, stream);
+    var client = try Client.init(allocator);
+    client.ptr.* = Client.init(stream);
+    client.incRef();
+    defer client.decRef();
 
-    const message = try in_stream.readUntilDelimiterAlloc(allocator, '!', 1024);
+    const message = try in_stream.readUntilDelimiterAlloc(allocator, '!', 512);
     errdefer allocator.free(message);
 
     logger.info("got msg from fd {}, {} '{}'", .{ sock.handle, message.len, message });

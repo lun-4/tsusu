@@ -5,7 +5,7 @@ const DaemonState = daemon.DaemonState;
 const ServiceDecl = daemon.ServiceDecl;
 const Service = daemon.Service;
 const ServiceStateType = daemon.ServiceStateType;
-const Client = @import("client.zig").Client;
+const RcClient = daemon.RcClient;
 
 pub const KillServiceContext = struct {
     state: *DaemonState,
@@ -69,10 +69,13 @@ pub fn killService(ctx: KillServiceContext) !void {
 pub const WatchServiceContext = struct {
     state: *DaemonState,
     service: *Service,
-    client: *Client,
+    client: *RcClient,
 };
 
 pub fn watchService(ctx: WatchServiceContext) !void {
+    ctx.client.incRef();
+    defer ctx.client.decRef();
+
     var state = ctx.state;
     var service = ctx.service;
 
@@ -105,11 +108,14 @@ pub const SpecificWatchServiceContext = struct {
     state: *DaemonState,
     typ: SpecificWatchType,
     service: *Service,
-    client: *Client,
+    client: *RcClient,
     in_fd: std.os.fd_t,
 };
 
 fn specificWatchService(ctx: SpecificWatchServiceContext) !void {
+    ctx.client.incRef();
+    defer ctx.client.decRef();
+
     var buf: [128]u8 = undefined;
     const prefix = switch (ctx.typ) {
         .Out => "stdout",
@@ -131,6 +137,6 @@ fn specificWatchService(ctx: SpecificWatchServiceContext) !void {
         var line_buf: [512]u8 = undefined;
         const bytecount = try duped_stream.read(&line_buf);
         const stream_data = line_buf[0..bytecount];
-        try ctx.client.print("data;{};{};{}!", .{ ctx.service.name, prefix, stream_data });
+        try ctx.client.ptr.?.print("data;{};{};{}!", .{ ctx.service.name, prefix, stream_data });
     }
 }
