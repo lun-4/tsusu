@@ -409,6 +409,58 @@ fn sigemptyset(set: *std.os.sigset_t) void {
     }
 }
 
+fn readFromSignalFd(signal_fd: std.os.fd_t) !void {
+    var buf: [@sizeOf(os.linux.signalfd_siginfo)]u8 align(8) = undefined;
+    _ = try os.read(signal_fd, &buf);
+
+    var siginfo = @ptrCast(*os.linux.signalfd_siginfo, @alignCast(
+        @alignOf(*os.linux.signalfd_siginfo),
+        &buf,
+    ));
+
+    var sig = siginfo.signo;
+    if (sig != os.SIGINT and sig != os.SIGTERM) {
+        logger.info("got signal {}, not INT ({}) or TERM ({}), ignoring", .{
+            sig,
+            os.SIGINT,
+            os.SIGTERM,
+        });
+
+        return;
+    }
+
+    logger.info("got SIGINT or SIGTERM, stopping!", .{});
+
+    const pidpath = try helpers.getPathFor(state.allocator, .Pid);
+    const sockpath = try helpers.getPathFor(state.allocator, .Sock);
+
+    std.os.unlink(pidpath) catch |err| {
+        logger.info("failed to delete pid file: {}", .{err});
+    };
+    std.os.unlink(sockpath) catch |err| {
+        logger.info("failed to delete sock file: {}", .{err});
+    };
+
+    return error.Shutdown;
+}
+
+fn handleNewClient(server: *std.net.StreamServer, sockets: *PollFdList) !void {
+    var conn = try server.accept();
+    var sock = conn.file;
+
+    sockets.append(os.pollfd{
+        .fd = sock.handle,
+        .events = os.POLLIN,
+        .revents = 0,
+    }) catch |err| {
+        _ = try sock.write("err out of memory!");
+        return;
+    };
+
+    _ = try sock.write("helo!");
+    return;
+}
+
 pub fn main(logger: *FileLogger) anyerror!void {
     logger.info("main!", .{});
     const allocator = std.heap.page_allocator;
@@ -472,60 +524,11 @@ pub fn main(logger: *FileLogger) anyerror!void {
             //if (pollfd.revents != os.POLLIN) return error.UnexpectedSocketRevents;
 
             if (pollfd.fd == server.sockfd.?) {
-                while (true) {
-                    var conn = server.accept() catch |e| {
-                        logger.info("[d??]{}", .{e});
-                        unreachable;
-                    };
-
-                    var sock = conn.file;
-                    try sockets.append(os.pollfd{
-                        .fd = sock.handle,
-                        .events = os.POLLIN,
-                        .revents = 0,
-                    });
-
-                    // as soon as we get a new client, send helo
-                    _ = try sock.write("helo!");
-
-                    // TODO many clients per accept someday
-                    break;
-                }
+                handleNewClient(&server, &sockets);
             } else if (pollfd.fd == signal_fd) {
-                var buf: [@sizeOf(os.linux.signalfd_siginfo)]u8 align(8) = undefined;
-                _ = os.read(signal_fd, &buf) catch |err| {
-                    logger.info("failed to read from signal fd: {}", .{err});
-                    return;
+                readFromSignalFd(signal_fd) catch |err| {
+                    if (err == error.Shutdown) return else logger.info("failed to read from signal fd: {}\n", .{err});
                 };
-
-                var siginfo = @ptrCast(*os.linux.signalfd_siginfo, @alignCast(
-                    @alignOf(*os.linux.signalfd_siginfo),
-                    &buf,
-                ));
-
-                var sig = siginfo.signo;
-                if (sig != os.SIGINT and sig != os.SIGTERM) {
-                    logger.info("got signal {}, not INT ({}) or TERM ({}), ignoring", .{
-                        sig,
-                        os.SIGINT,
-                        os.SIGTERM,
-                    });
-                    continue;
-                }
-
-                logger.info("got SIGINT or SIGTERM, stopping!", .{});
-
-                const pidpath = try helpers.getPathFor(state.allocator, .Pid);
-                const sockpath = try helpers.getPathFor(state.allocator, .Sock);
-
-                std.os.unlink(pidpath) catch |err| {
-                    logger.info("failed to delete pid file: {}", .{err});
-                };
-                std.os.unlink(sockpath) catch |err| {
-                    logger.info("failed to delete sock file: {}", .{err});
-                };
-
-                return;
             } else {
                 logger.info("got fd for read! fd={}", .{pollfd.fd});
 
