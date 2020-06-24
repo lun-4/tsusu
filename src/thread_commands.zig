@@ -10,7 +10,7 @@ const RcClient = daemon.RcClient;
 pub const KillServiceContext = struct {
     state: *DaemonState,
     service: *const Service,
-    stream: daemon.OutStream,
+    client: *RcClient,
 };
 
 pub const KillError = error{ PermissionDenied, UnknownPID } || std.os.UnexpectedError;
@@ -27,12 +27,12 @@ pub fn kill(pid: std.os.pid_t, sig: u8) KillError!void {
 }
 
 pub fn killService(ctx: KillServiceContext) !void {
+    ctx.client.incRef();
+    defer ctx.client.decRef();
+
     var state = ctx.state;
     var allocator = ctx.state.allocator;
     const service = ctx.service;
-    var stream = ctx.stream;
-
-    // try stream.print("ack!", .{});
 
     // std.debug.assert(@as(ServiceStateType, service.state) == .Running);
     const pid = service.state.Running.pid;
@@ -43,7 +43,7 @@ pub fn killService(ctx: KillServiceContext) !void {
 
     kill(pid, std.os.SIGTERM) catch |err| {
         if (err == error.UnknownPID) {
-            try stream.print("err pid not found for SIGTERM!", .{});
+            try ctx.client.ptr.?.print("err pid not found for SIGTERM!", .{});
             return;
         }
 
@@ -63,7 +63,7 @@ pub fn killService(ctx: KillServiceContext) !void {
     // SIGKILL and we have updated state.
     std.time.sleep(250 * std.time.ns_per_ms);
 
-    try state.writeServices(stream);
+    try state.writeServices(ctx.client.ptr.?.stream);
 }
 
 pub const WatchServiceContext = struct {

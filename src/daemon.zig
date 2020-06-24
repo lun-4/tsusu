@@ -288,7 +288,7 @@ fn readManyFromClient(
     // no freeing is done of the client wrapper struct, as it manages
     // its own memory via refcounting, as this struct can be passed around
     // many threads
-    var client = try Client.init(allocator);
+    var client = try RcClient.init(allocator);
     client.ptr.* = Client.init(stream);
     client.incRef();
     defer client.decRef();
@@ -367,7 +367,7 @@ fn readManyFromClient(
             }
 
             _ = try std.Thread.spawn(
-                KillServiceContext{ .state = state, .service = kv.value, .stream = stream },
+                KillServiceContext{ .state = state, .service = kv.value, .client = client },
                 killService,
             );
         } else {
