@@ -209,6 +209,7 @@ pub const DaemonState = struct {
     }
 
     pub fn addClient(self: *@This(), fd: std.os.fd_t, client: *RcClient) !void {
+        std.debug.warn("add client fd={} ptr={x}\n", .{ fd, @ptrToInt(client.ptr.?) });
         _ = try self.clients.put(fd, client);
     }
 
@@ -293,15 +294,22 @@ fn readManyFromClient(
     var in_stream = sock.inStream();
     var stream: OutStream = sock.outStream();
 
-    // no freeing is done of the client wrapper struct, as it manages
-    // its own memory via refcounting, as this struct can be passed around
-    // many threads
+    var client: *RcClient = undefined;
 
-    var client = try RcClient.init(allocator);
-    client.ptr.?.* = Client.init(stream);
+    // reuse allocated RcClient in state, and if it doesnt exist, create
+    // a new client.
+    var client_kv_opt = state.clients.get(pollfd.fd);
+    if (client_kv_opt) |client_kv| {
+        client = client_kv.value;
+    } else {
+        // freeing of the RcClient and Client wrapped struct is done
+        // by themselves. memory of this is managed via refcounting
+        client = try RcClient.init(allocator);
+        client.ptr.?.* = Client.init(stream);
 
-    // link fd to client inside state
-    try state.addClient(pollfd.fd, client);
+        // link fd to client inside state
+        try state.addClient(pollfd.fd, client);
+    }
 
     const message = try in_stream.readUntilDelimiterAlloc(allocator, '!', 512);
     errdefer allocator.free(message);
@@ -561,6 +569,7 @@ pub fn main(logger: *FileLogger) anyerror!void {
                     // operations on it will give error.Closed
                     var kv_opt = state.clients.get(pollfd.fd);
                     if (kv_opt) |kv| {
+                        std.debug.warn("close client ptr={x}\n", .{@ptrToInt(kv.value.ptr.?)});
                         kv.value.ptr.?.close();
                         _ = state.clients.remove(pollfd.fd);
                     }

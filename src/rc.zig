@@ -149,7 +149,8 @@ pub fn HeapRc(comptime T: type) type {
 
         pub fn incRef(self: *Self) *Self {
             if (self.ptr != null) {
-                _ = self.refs.incr();
+                const val = self.refs.incr();
+                std.debug.warn("incref'd, val={}\n", .{val});
             }
             return self;
         }
@@ -157,6 +158,7 @@ pub fn HeapRc(comptime T: type) type {
         pub fn decRef(self: *Self) void {
             if (self.ptr != null) {
                 const val = self.refs.decr();
+                std.debug.warn("decref'd, val={}\n", .{val});
                 if (val == 1) {
                     self.deinit();
                 }

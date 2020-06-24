@@ -111,6 +111,7 @@ pub const SpecificWatchServiceContext = struct {
 };
 
 fn specificWatchService(ctx: SpecificWatchServiceContext) !void {
+    std.debug.warn("specific watch client ptr={x}\n", .{@ptrToInt(ctx.client.ptr.?)});
     defer ctx.client.decRef();
 
     var buf: [128]u8 = undefined;
