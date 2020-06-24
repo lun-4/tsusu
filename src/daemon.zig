@@ -462,8 +462,8 @@ fn handleNewClient(logger: *FileLogger, server: *std.net.StreamServer, sockets: 
         .events = os.POLLIN,
         .revents = 0,
     }) catch |err| {
-        _ = sock.write("err out of memory!") catch |err| {
-            logger.info("Failed to send OOM message: {}", .{err});
+        _ = sock.write("err out of memory!") catch |write_err| {
+            logger.info("Failed to send message from {} in append: {}", .{ err, write_err });
         };
     };
 
