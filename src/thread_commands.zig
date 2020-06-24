@@ -27,7 +27,6 @@ pub fn kill(pid: std.os.pid_t, sig: u8) KillError!void {
 }
 
 pub fn killService(ctx: KillServiceContext) !void {
-    ctx.client.incRef();
     defer ctx.client.decRef();
 
     var state = ctx.state;
@@ -73,7 +72,6 @@ pub const WatchServiceContext = struct {
 };
 
 pub fn watchService(ctx: WatchServiceContext) !void {
-    ctx.client.incRef();
     defer ctx.client.decRef();
 
     var state = ctx.state;
@@ -90,7 +88,7 @@ pub fn watchService(ctx: WatchServiceContext) !void {
         .service = service,
         .typ = .Out,
         .in_fd = stdout,
-        .client = ctx.client,
+        .client = ctx.client.incRef(),
     }, specificWatchService);
 
     _ = try std.Thread.spawn(SpecificWatchServiceContext{
@@ -98,7 +96,7 @@ pub fn watchService(ctx: WatchServiceContext) !void {
         .service = service,
         .typ = .Err,
         .in_fd = stderr,
-        .client = ctx.client,
+        .client = ctx.client.incRef(),
     }, specificWatchService);
 }
 
@@ -113,7 +111,6 @@ pub const SpecificWatchServiceContext = struct {
 };
 
 fn specificWatchService(ctx: SpecificWatchServiceContext) !void {
-    ctx.client.incRef();
     defer ctx.client.decRef();
 
     var buf: [128]u8 = undefined;
@@ -137,6 +134,9 @@ fn specificWatchService(ctx: SpecificWatchServiceContext) !void {
         var line_buf: [512]u8 = undefined;
         const bytecount = try duped_stream.read(&line_buf);
         const stream_data = line_buf[0..bytecount];
-        try ctx.client.ptr.?.print("data;{};{};{}!", .{ ctx.service.name, prefix, stream_data });
+        ctx.client.ptr.?.print("data;{};{};{}!", .{ ctx.service.name, prefix, stream_data }) catch |err| {
+            ctx.state.logger.info("error while sending stream to client: {}", .{err});
+            return;
+        };
     }
 }

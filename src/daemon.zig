@@ -16,9 +16,9 @@ const KillServiceContext = thread_commands.KillServiceContext;
 const WatchServiceContext = thread_commands.WatchServiceContext;
 const watchService = thread_commands.watchService;
 
-const Rc = @import("rc.zig").Rc;
+const HeapRc = @import("rc.zig").HeapRc;
 const Client = @import("client.zig").Client;
-pub const RcClient = Rc(Client);
+pub const RcClient = HeapRc(Client);
 
 pub const ServiceStateType = enum(u8) {
     NotRunning,
@@ -122,9 +122,12 @@ fn serializeString(serializer: var, string: []const u8) !void {
     }
 }
 
+pub const ClientMap = std.AutoHashMap(std.os.fd_t, *RcClient);
+
 pub const DaemonState = struct {
     allocator: *std.mem.Allocator,
     services: ServiceMap,
+    clients: ClientMap,
     logger: *FileLogger,
 
     status_pipe: [2]std.os.fd_t,
@@ -133,6 +136,7 @@ pub const DaemonState = struct {
         return DaemonState{
             .allocator = allocator,
             .services = ServiceMap.init(allocator),
+            .clients = ClientMap.init(allocator),
             .logger = logger,
             .status_pipe = try std.os.pipe(),
         };
@@ -202,6 +206,10 @@ pub const DaemonState = struct {
             service.name,
             service_ptr,
         );
+    }
+
+    pub fn addClient(self: *@This(), fd: std.os.fd_t, client: *RcClient) !void {
+        _ = try self.clients.put(fd, client);
     }
 
     fn readStatusMessage(self: *@This()) !void {
@@ -288,10 +296,12 @@ fn readManyFromClient(
     // no freeing is done of the client wrapper struct, as it manages
     // its own memory via refcounting, as this struct can be passed around
     // many threads
+
     var client = try RcClient.init(allocator);
-    client.ptr.* = Client.init(stream);
-    client.incRef();
-    defer client.decRef();
+    client.ptr.?.* = Client.init(stream);
+
+    // link fd to client inside state
+    try state.addClient(pollfd.fd, client);
 
     const message = try in_stream.readUntilDelimiterAlloc(allocator, '!', 512);
     errdefer allocator.free(message);
@@ -367,7 +377,7 @@ fn readManyFromClient(
             }
 
             _ = try std.Thread.spawn(
-                KillServiceContext{ .state = state, .service = kv.value, .client = client },
+                KillServiceContext{ .state = state, .service = kv.value, .client = client.incRef() },
                 killService,
             );
         } else {
@@ -396,7 +406,7 @@ fn readManyFromClient(
                 WatchServiceContext{
                     .state = state,
                     .service = kv.value,
-                    .client = client,
+                    .client = client.incRef(),
                 },
                 watchService,
             );
@@ -547,6 +557,14 @@ pub fn main(logger: *FileLogger) anyerror!void {
                 logger.info("got fd for read! fd={}", .{pollfd.fd});
 
                 readManyFromClient(&state, pollfd) catch |err| {
+                    // signal that the client must not be used, any other
+                    // operations on it will give error.Closed
+                    var kv_opt = state.clients.get(pollfd.fd);
+                    if (kv_opt) |kv| {
+                        kv.value.ptr.?.close();
+                        _ = state.clients.remove(pollfd.fd);
+                    }
+
                     std.os.close(pollfd.fd);
                     logger.info("closed fd {} from {}", .{ pollfd.fd, err });
                     _ = sockets.orderedRemove(idx);

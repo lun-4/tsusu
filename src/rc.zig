@@ -123,3 +123,62 @@ fn worker(ctx: *Rc(Ctx)) void {
         @panic("Nope");
     }
 }
+
+// This is an extension from the original zRc.
+/// Heap-aware Rc. Will destroy itself when the counter hits 1.
+pub fn HeapRc(comptime T: type) type {
+    return struct {
+        const refSize = u16;
+        refs: std.atomic.Int(refSize),
+        ptr: ?*T,
+        allocator: *std.mem.Allocator,
+
+        pub const Self = @This();
+
+        pub fn init(alloc: *std.mem.Allocator) !*Self {
+            var self = try alloc.create(Self);
+            var data = try alloc.create(T);
+            self.* = Self{
+                .refs = std.atomic.Int(refSize).init(1),
+                .ptr = data,
+                .allocator = alloc,
+            };
+
+            return self;
+        }
+
+        pub fn incRef(self: *Self) *Self {
+            if (self.ptr != null) {
+                _ = self.refs.incr();
+            }
+            return self;
+        }
+
+        pub fn decRef(self: *Self) void {
+            if (self.ptr != null) {
+                const val = self.refs.decr();
+                if (val == 1) {
+                    self.deinit();
+                }
+            }
+        }
+
+        pub fn deinit(self: *Self) void {
+            self.refs.set(0);
+
+            // pointer may want to do its own stuff
+            if (self.ptr) |ptr| {
+                // TODO only call if @hasDecl(T, "deinit") returns true
+                ptr.deinit();
+                self.allocator.destroy(self.ptr);
+            }
+
+            self.ptr = null;
+            self.allocator.destroy(self);
+        }
+
+        pub fn countRef(self: *Self) refSize {
+            return self.refs.get();
+        }
+    };
+}
