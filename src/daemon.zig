@@ -592,7 +592,12 @@ pub fn main(logger: *FileLogger) anyerror!void {
                     if (kv_opt) |kv| {
                         // decrease reference for main thread and mark
                         // the fd as closed
+
+                        // TODO: investigate why tsusu seems to destroy itself when
+                        // we don't force-close the fd here, since everyone
+                        // else should get EndOfStream, just like us...
                         kv.value.ptr.?.close();
+
                         kv.value.decRef();
                         _ = state.clients.remove(pollfd.fd);
                     }
