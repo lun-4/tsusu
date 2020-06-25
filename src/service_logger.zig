@@ -44,7 +44,10 @@ pub const ServiceLogger = struct {
         var deserializer = daemon.MsgDeserializer.init(stream);
 
         const opcode = try deserializer.deserialize(u8);
-        if (opcode == 1) return error.ShouldStop;
+        if (opcode == 1) {
+            ctx.state.logger.info("service logger for {} got stop signal", .{ctx.service.name});
+            return error.ShouldStop;
+        }
     }
 
     fn openLogFile(logfile_path: []const u8) !std.fs.File {
