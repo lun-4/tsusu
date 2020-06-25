@@ -29,8 +29,14 @@ pub const ServiceStateType = enum(u8) {
 
 pub const RunningState = struct {
     pid: std.os.pid_t,
+
+    /// File desctiptor for stdout
     stdout: std.os.fd_t,
     stderr: std.os.fd_t,
+
+    /// File desctiptor for the thread that reads from stdout and writes it
+    /// to a logfile
+    logger_thread: std.os.fd_t,
 };
 
 pub const ServiceState = union(ServiceStateType) {
@@ -63,6 +69,8 @@ pub const Message = union(MessageOP) {
         pid: std.os.pid_t,
         stdout: std.fs.File,
         stderr: std.fs.File,
+
+        logger_thread: std.os.fd_t,
     },
     ServiceExited: struct { name: []const u8, exit_code: u32 },
 };
@@ -159,6 +167,7 @@ pub const DaemonState = struct {
                 try serializer.serialize(data.pid);
                 try serializer.serialize(data.stdout.handle);
                 try serializer.serialize(data.stderr.handle);
+                try serializer.serialize(data.logger_thread);
             },
             .ServiceExited => |data| {
                 try serializeString(&serializer, data.name);
@@ -228,6 +237,7 @@ pub const DaemonState = struct {
                 const pid = try deserializer.deserialize(std.os.pid_t);
                 const stdout = try deserializer.deserialize(std.os.fd_t);
                 const stderr = try deserializer.deserialize(std.os.fd_t);
+                const logger_thread = try deserializer.deserialize(std.os.fd_t);
                 self.logger.info(
                     "serivce {} started on pid {} stdout={} stderr={}",
                     .{ service_name, pid, stdout, stderr },
@@ -237,6 +247,8 @@ pub const DaemonState = struct {
                         .pid = pid,
                         .stdout = stdout,
                         .stderr = stderr,
+
+                        .logger_thread = logger_thread,
                     },
                 };
             },
