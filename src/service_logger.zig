@@ -20,6 +20,12 @@ pub const ServiceLogger = struct {
         try serializer.serialize(@as(u8, 1));
     }
 
+    pub fn addOutputFd(logger_fd: std.os.fd_t, output_fd: std.fs.fd_t) !void {
+        var file = std.fs.File{ .handle = logger_fd };
+        var serializer = daemon.MsgSerializer.init(file.writer());
+        try serializer.serialize(@as(u8, 1));
+    }
+
     pub fn handleProcessStream(ctx: Context, fd: std.os.fd_t) !void {
         // poll() is level-triggered, that means we can just read 512 bytes
         // then hand off to the next poll() call, which will still signal

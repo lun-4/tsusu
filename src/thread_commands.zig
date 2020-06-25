@@ -73,7 +73,7 @@ pub fn killService(ctx: KillServiceContext) !void {
     std.time.sleep(250 * std.time.ns_per_ms);
 
     ctx.state.logger.info("sent wanted signals to pid {}", .{pid});
-    try state.writeServices(ctx.client.ptr.?.stream);
+    try state.writeServices(ctx.client.ptr.?.stream());
 }
 
 pub const WatchServiceContext = struct {

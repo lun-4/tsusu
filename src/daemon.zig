@@ -317,7 +317,7 @@ fn readManyFromClient(
         // freeing of the RcClient and Client wrapped struct is done
         // by themselves. memory of this is managed via refcounting
         client = try RcClient.init(allocator);
-        client.ptr.?.* = Client.init(stream);
+        client.ptr.?.* = Client.init(pollfd.fd);
 
         // increment reference (for the main thread)
         _ = client.incRef();
@@ -590,15 +590,11 @@ pub fn main(logger: *FileLogger) anyerror!void {
                     // operations on it will give error.Closed
                     var kv_opt = state.clients.get(pollfd.fd);
                     if (kv_opt) |kv| {
-                        std.debug.warn("close client ptr={x}\n", .{@ptrToInt(kv.value.ptr.?)});
-                        kv.value.ptr.?.close();
-
                         // decrease reference for main thread
                         kv.value.decRef();
                         _ = state.clients.remove(pollfd.fd);
                     }
 
-                    std.os.close(pollfd.fd);
                     _ = sockets.orderedRemove(idx);
                 };
             }
