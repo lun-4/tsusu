@@ -590,7 +590,9 @@ pub fn main(logger: *FileLogger) anyerror!void {
                     // operations on it will give error.Closed
                     var kv_opt = state.clients.get(pollfd.fd);
                     if (kv_opt) |kv| {
-                        // decrease reference for main thread
+                        // decrease reference for main thread and mark
+                        // the fd as closed
+                        kv.value.ptr.?.close();
                         kv.value.decRef();
                         _ = state.clients.remove(pollfd.fd);
                     }
