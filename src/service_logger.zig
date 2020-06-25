@@ -26,7 +26,7 @@ pub const ServiceLogger = struct {
         try serializer.serialize(@as(u8, 1));
     }
 
-    pub fn handleProcessStream(ctx: Context, fd: std.os.fd_t) !void {
+    pub fn handleProcessStream(ctx: Context, fd: std.os.fd_t, file: std.fs.File) !void {
         // poll() is level-triggered, that means we can just read 512 bytes
         // then hand off to the next poll() call, which will still signal
         // the socket as available.
@@ -34,9 +34,8 @@ pub const ServiceLogger = struct {
         const bytes = try std.os.read(fd, &buf);
         const msg = buf[0..bytes];
 
-        std.debug.warn("got logline: {}\n", .{msg});
-
-        // XXX: write to logfile
+        // formatting of the logfile is done by the app, and not us
+        _ = try file.write(msg);
     }
 
     pub fn handleSignalMessage(ctx: Context) !void {
@@ -48,12 +47,64 @@ pub const ServiceLogger = struct {
         if (opcode == 1) return error.ShouldStop;
     }
 
+    fn openLogFile(logfile_path: []const u8) !std.fs.File {
+        var logfile = try std.fs.cwd().createFile(
+            logfile_path,
+            .{
+                .read = false,
+                .truncate = false,
+            },
+        );
+
+        try logfile.seekFromEnd(0);
+
+        return logfile;
+    }
+
     pub fn handler(ctx: Context) !void {
         var sockets = [_]std.os.pollfd{
             .{ .fd = ctx.stdout, .events = std.os.POLLIN, .revents = 0 },
             .{ .fd = ctx.stderr, .events = std.os.POLLIN, .revents = 0 },
             .{ .fd = ctx.message_fd, .events = std.os.POLLIN, .revents = 0 },
         };
+
+        var buf: [1024]u8 = undefined;
+        var fba = std.heap.FixedBufferAllocator.init(&buf);
+        var allocator = &fba.allocator;
+
+        // TODO: better folder..? maybe we cant use getAppDataDir
+        const data_dir = try std.fs.getAppDataDir(allocator, "tsusu");
+        std.fs.cwd().makeDir(data_dir) catch |err| {
+            if (err != std.os.MakeDirError.PathAlreadyExists) return err;
+        };
+
+        const log_folder = try std.fmt.allocPrint(allocator, "{}/logs", .{data_dir});
+        std.fs.cwd().makeDir(log_folder) catch |err| {
+            if (err != std.os.MakeDirError.PathAlreadyExists) return err;
+        };
+
+        const stdout_logfile_path = try std.fmt.allocPrint(
+            allocator,
+            "{}/{}-out.log",
+            .{ log_folder, ctx.service.name },
+        );
+        const stderr_logfile_path = try std.fmt.allocPrint(
+            allocator,
+            "{}/{}-err.log",
+            .{ log_folder, ctx.service.name },
+        );
+
+        // open logfiles for stdout and stder
+        var stdout_logfile = try @This().openLogFile(stdout_logfile_path);
+        defer stdout_logfile.close();
+
+        var stderr_logfile = try @This().openLogFile(stderr_logfile_path);
+        defer stderr_logfile.close();
+
+        ctx.state.logger.info(
+            "Opened stdout/stderr log files for {}, {}, {}",
+            .{ ctx.service.name, stdout_logfile_path, stderr_logfile_path },
+        );
 
         while (true) {
             const available = try std.os.poll(&sockets, -1);
@@ -64,8 +115,10 @@ pub const ServiceLogger = struct {
 
             for (sockets) |pollfd, idx| {
                 if (pollfd.revents == 0) continue;
-                if (pollfd.fd == ctx.stdout or pollfd.fd == ctx.stderr) {
-                    try @This().handleProcessStream(ctx, pollfd.fd);
+                if (pollfd.fd == ctx.stdout) {
+                    try @This().handleProcessStream(ctx, pollfd.fd, stdout_logfile);
+                } else if (pollfd.fd == ctx.stderr) {
+                    try @This().handleProcessStream(ctx, pollfd.fd, stderr_logfile);
                 } else if (pollfd.fd == ctx.message_fd) {
                     @This().handleSignalMessage(ctx) catch |err| {
                         if (err == error.ShouldStop) return else return err;
