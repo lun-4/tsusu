@@ -585,6 +585,7 @@ pub fn main(logger: *FileLogger) anyerror!void {
 
                 readManyFromClient(&state, pollfd) catch |err| {
                     logger.info("got error, fd={} err={}", .{ pollfd.fd, err });
+
                     // signal that the client must not be used, any other
                     // operations on it will give error.Closed
                     var kv_opt = state.clients.get(pollfd.fd);
