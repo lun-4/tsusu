@@ -319,6 +319,9 @@ fn readManyFromClient(
         client = try RcClient.init(allocator);
         client.ptr.?.* = Client.init(stream);
 
+        // increment reference (for the main thread)
+        _ = client.incRef();
+
         // link fd to client inside state
         try state.addClient(pollfd.fd, client);
     }
@@ -397,7 +400,11 @@ fn readManyFromClient(
             }
 
             _ = try std.Thread.spawn(
-                KillServiceContext{ .state = state, .service = kv.value, .client = client.incRef() },
+                KillServiceContext{
+                    .state = state,
+                    .service = kv.value,
+                    .client = client.incRef(),
+                },
                 killService,
             );
         } else {
@@ -577,17 +584,20 @@ pub fn main(logger: *FileLogger) anyerror!void {
                 logger.info("got fd for read! fd={}", .{pollfd.fd});
 
                 readManyFromClient(&state, pollfd) catch |err| {
+                    logger.info("got error, fd={} err={}", .{ pollfd.fd, err });
                     // signal that the client must not be used, any other
                     // operations on it will give error.Closed
                     var kv_opt = state.clients.get(pollfd.fd);
                     if (kv_opt) |kv| {
                         std.debug.warn("close client ptr={x}\n", .{@ptrToInt(kv.value.ptr.?)});
                         kv.value.ptr.?.close();
+
+                        // decrease reference for main thread
+                        kv.value.decRef();
                         _ = state.clients.remove(pollfd.fd);
                     }
 
                     std.os.close(pollfd.fd);
-                    logger.info("closed fd {} from {}", .{ pollfd.fd, err });
                     _ = sockets.orderedRemove(idx);
                 };
             }
