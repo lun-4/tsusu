@@ -372,7 +372,10 @@ fn readManyFromClient(
         }
 
         // TODO maybe some refcounting magic could go here
-        const service_cmdline = parts_it.next().?;
+        const service_cmdline = parts_it.next() orelse {
+            try stream.print("err path needed for new service!", .{});
+            return;
+        };
         logger.info("got service start: {} {}", .{ service_name, service_cmdline });
 
         var service = try allocator.create(ServiceDecl);
