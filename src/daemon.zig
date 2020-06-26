@@ -391,6 +391,9 @@ fn readManyFromClient(
             superviseProcess,
         );
         try state.addSupervisor(service.*, supervisor_thread);
+
+        // TODO: remove this, make starting itself run in a thread.
+        std.time.sleep(250 * std.time.ns_per_ms);
         try state.writeServices(stream);
     } else if (std.mem.startsWith(u8, message, "service")) {
         var parts_it = std.mem.split(message, ";");
