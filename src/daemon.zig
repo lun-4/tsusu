@@ -342,19 +342,30 @@ fn readManyFromClient(
         _ = parts_it.next();
 
         // TODO: error handling on malformed messages
-        // TODO maybe some refcounting magic could go here
         const service_name = parts_it.next().?;
+        var existing_kv = state.services.get(service_name);
+        if (existing_kv != null) {
+            // start existing service
+            var service = existing_kv.value;
+
+            // XXX: we just need to start the supervisor thread again
+            // and point the service in memory to it
+
+            // XXX: refactor the supervisor to follow the pattern of other
+            // threaded commands. it should be easier to manage. also
+            // use Service instead of ServiceDecl. we should
+            // remove ServiceDecl
+
+            return;
+        }
+
+        // TODO maybe some refcounting magic could go here
         const service_cmdline = parts_it.next().?;
         logger.info("got service start: {} {}", .{ service_name, service_cmdline });
 
         var service = try allocator.create(ServiceDecl);
         service.* =
             ServiceDecl{ .name = service_name, .cmdline = service_cmdline };
-
-        if (state.services.get(service_name) != null) {
-            _ = try stream.write("err exists!");
-            return;
-        }
 
         logger.info("starting service {} with cmdline {}", .{ service_name, service_cmdline });
 
