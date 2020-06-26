@@ -346,7 +346,9 @@ fn readManyFromClient(
         var existing_kv = state.services.get(service_name);
         if (existing_kv != null) {
             // start existing service
-            var service = existing_kv.value;
+            var service = existing_kv.?.value;
+
+            service.stop_flag = false;
 
             // XXX: we just need to start the supervisor thread again
             // and point the service in memory to it
@@ -356,6 +358,16 @@ fn readManyFromClient(
             // use Service instead of ServiceDecl. we should
             // remove ServiceDecl
 
+            var decl = try allocator.create(ServiceDecl);
+            decl.* =
+                ServiceDecl{ .name = service.name, .cmdline = service.path };
+
+            const supervisor_thread = try std.Thread.spawn(
+                SupervisorContext{ .state = state, .service = decl },
+                superviseProcess,
+            );
+            try state.addSupervisor(decl.*, supervisor_thread);
+            try state.writeServices(stream);
             return;
         }
 
