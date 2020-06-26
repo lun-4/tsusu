@@ -290,10 +290,15 @@ pub fn main() anyerror!void {
         },
 
         .Start => {
-            try out_stream.print("start;{};{}!", .{
+            try out_stream.print("start;{}", .{
                 try (ctx.args_it.next(allocator) orelse @panic("expected name")),
-                try (ctx.args_it.next(allocator) orelse @panic("expected path")),
             });
+
+            const path = ctx.args_it.next(allocator);
+            if (path != null) {
+                try out_stream.print(";{}", .{try path.?});
+            }
+            try out_stream.print("!", .{});
 
             const msg = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 1024);
             defer ctx.allocator.free(msg);
