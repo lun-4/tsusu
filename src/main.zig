@@ -75,13 +75,8 @@ pub const Context = struct {
         var logfile = try std.fs.cwd().createFile(logpath, .{
             .truncate = false,
         });
-        defer logfile.close();
         var logstream = logfile.outStream();
         var logger = Logger(std.fs.File.OutStream).init(logstream, "[d]");
-
-        defer {
-            std.os.unlink(pidpath) catch |err| {}; // do nothing on errors
-        }
 
         _ = try setsid();
 
@@ -98,7 +93,18 @@ pub const Context = struct {
             logger.info("Failed to dup2 stderr to logfile: {}", .{err});
         };
 
-        try daemon.main(&logger);
+        // TODO: better way to express that we want to delete pidpath
+        // on any scenario. since we exit() at the end, no defer blocks
+        // actually run
+        daemon.main(&logger) catch |daemon_err| {
+            std.os.unlink(pidpath) catch |err| {}; // do nothing on errors
+            logfile.close();
+            return daemon_err;
+        };
+
+        std.os.unlink(pidpath) catch |err| {}; // do nothing on errors
+        logfile.close();
+        std.os.exit(0);
     }
 };
 
