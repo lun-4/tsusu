@@ -117,12 +117,18 @@ pub fn watchService(ctx: WatchServiceContext) !void {
     var deserializer = daemon.MsgDeserializer.init(read_file.reader());
     while (true) {
         const opcode = try deserializer.deserialize(u8);
+
         if (opcode == 1) {
             const err_msg = try deserializeString(ctx.state.allocator, &deserializer);
             defer ctx.state.allocator.free(err_msg);
 
             std.debug.warn("Failed to link client to daemon: '{}'", .{err_msg});
-            try ctx.client.ptr.?.print("err {}!", .{err_msg});
+            ctx.client.ptr.?.print("err {}!", .{err_msg}) catch |err| {
+                if (err == error.Closed) {
+                    // if client is closed, don't care
+                    return;
+                } else return err;
+            };
         }
 
         if (opcode == 2 or opcode == 3) {
@@ -130,7 +136,12 @@ pub fn watchService(ctx: WatchServiceContext) !void {
             defer ctx.state.allocator.free(data_msg);
 
             const std_name = if (opcode == 2) "stdout" else "stderr";
-            try ctx.client.ptr.?.print("data;{};{};{}", .{ ctx.service.name, std_name, data_msg });
+            ctx.client.ptr.?.print("data;{};{};{}", .{ ctx.service.name, std_name, data_msg }) catch |err| {
+                if (err == error.Closed) {
+                    // if client is closed, don't care
+                    return;
+                } else return err;
+            };
         }
     }
 }
