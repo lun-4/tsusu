@@ -1,6 +1,6 @@
 # tsusu protocol
 
-**TODO. NOTHING in here is actually implemented, just ideas**
+**TODO. nothing in here makes sense, should rewrite it**
 
 the protocol is:
  - used to communicate between the executable `tsusu` and the daemon
