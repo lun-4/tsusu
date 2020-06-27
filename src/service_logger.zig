@@ -63,7 +63,9 @@ pub const ServiceLogger = struct {
         try serializer.serialize(output_fd);
     }
 
-    pub fn handleProcessStream(self: *Self, ctx: Context, fd: std.os.fd_t, file: std.fs.File) !void {
+    pub const Std = enum { Out, Err };
+
+    pub fn handleProcessStream(self: *Self, ctx: Context, typ: Std, fd: std.os.fd_t, file: std.fs.File) !void {
         // poll() is level-triggered, that means we can just read 512 bytes
         // then hand off to the next poll() call, which will still signal
         // the socket as available.
@@ -71,10 +73,29 @@ pub const ServiceLogger = struct {
         const bytes = try std.os.read(fd, &buf);
         const msg = buf[0..bytes];
 
-        // XXX: write buffer to self.client_fds with proper framing
-
         // formatting of the logfile is done by the app, and not us
+        // also always write to the logfile first, THEN check
+        // the client fds to write to
         _ = try file.write(msg);
+
+        for (self.client_fds.items) |client_fd, idx| {
+            var client_file = std.fs.File{ .handle = client_fd };
+            var serializer = daemon.MsgSerializer.init(client_file.writer());
+
+            // TODO: there may be some contention here if the client closes
+            // the socket if it closes while we try to read data
+
+            // XXX: remove client from client_fds array on error
+            serializer.serialize(@as(u8, if (typ == .Out) 2 else 3)) catch |err| {
+                std.debug.warn("got error on writing to client fd {}: {}", .{ client_fd, err });
+                continue;
+            };
+
+            serializer.serialize(@intCast(u16, msg.len)) catch continue;
+            for (msg) |byte| {
+                serializer.serialize(byte) catch continue;
+            }
+        }
     }
 
     fn sendError(ctx: Context, serializer: var, error_message: []const u8) void {
@@ -186,9 +207,9 @@ pub const ServiceLogger = struct {
                 if (pollfd.revents == 0) continue;
 
                 if (pollfd.fd == ctx.stdout) {
-                    try @This().handleProcessStream(&self, ctx, pollfd.fd, stdout_logfile);
+                    try @This().handleProcessStream(&self, ctx, .Out, pollfd.fd, stdout_logfile);
                 } else if (pollfd.fd == ctx.stderr) {
-                    try @This().handleProcessStream(&self, ctx, pollfd.fd, stderr_logfile);
+                    try @This().handleProcessStream(&self, ctx, .Err, pollfd.fd, stderr_logfile);
                 } else if (pollfd.fd == ctx.message_fd) {
                     @This().handleSignalMessage(&self, ctx) catch |err| {
                         if (err == error.ShouldStop) return else return err;
