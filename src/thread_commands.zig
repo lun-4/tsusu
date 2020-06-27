@@ -106,6 +106,9 @@ pub fn watchService(ctx: WatchServiceContext) !void {
     const read_fd = pipes[0];
     const write_fd = pipes[1];
 
+    // service logger owns write_fd, we must not close it
+    defer std.os.close(read_fd);
+
     // give write_fd to service logger thread
     try ServiceLogger.addOutputFd(service.state.Running.logger_thread, write_fd);
 
