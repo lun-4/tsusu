@@ -205,9 +205,15 @@ fn watchCommand(ctx: *Context, in_stream: var, out_stream: var) !void {
 
     try out_stream.print("logs;{}!", .{name});
     while (true) {
-        const msg = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 1024);
+        const msg = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 65535);
         defer ctx.allocator.free(msg);
-        std.debug.warn("msg: '{}'\n", .{msg});
+        var it = std.mem.split(msg, ";");
+        _ = it.next();
+        const service = it.next().?;
+        const stream = it.next().?;
+        const data = it.next().?;
+
+        std.debug.warn("{} from {}: {}", .{ service, stream, data });
     }
 }
 
