@@ -82,33 +82,54 @@ pub const WatchServiceContext = struct {
     client: *RcClient,
 };
 
+/// Caller owns the returned memory.
+fn deserializeString(allocator: *std.mem.Allocator, deserializer: var) ![]const u8 {
+    const length = try deserializer.deserialize(u16);
+
+    var msg = try allocator.alloc(u8, length);
+
+    var i: usize = 0;
+    while (i < length) : (i += 1) {
+        msg[i] = try deserializer.deserialize(u8);
+    }
+
+    return msg;
+}
+
 pub fn watchService(ctx: WatchServiceContext) !void {
     defer ctx.client.decRef();
 
     var state = ctx.state;
     var service = ctx.service;
 
-    const stdout = service.state.Running.stdout;
-    const stderr = service.state.Running.stderr;
+    const pipes = try std.os.pipe();
+    const read_fd = pipes[0];
+    const write_fd = pipes[1];
 
-    // spawn two threads that write to the stream for each
-    // file descriptor
+    // XXX: give write_fd to service logger thread
 
-    _ = try std.Thread.spawn(SpecificWatchServiceContext{
-        .state = state,
-        .service = service,
-        .typ = .Out,
-        .in_fd = stdout,
-        .client = ctx.client.incRef(),
-    }, specificWatchService);
+    // read from read_fd in a loop
+    var read_file = std.fs.File{ .handle = read_file };
+    var deserializer = daemon.MsgDeserializer.init(read_file.reader());
+    while (true) {
+        const opcode = try deserializer.deserialize(u8);
+        if (opcode == 1) {
+            const err_msg = try deserializeString(ctx.state.allocator, &deserializer);
+            defer ctx.state.allocator.free(err_msg);
 
-    _ = try std.Thread.spawn(SpecificWatchServiceContext{
-        .state = state,
-        .service = service,
-        .typ = .Err,
-        .in_fd = stderr,
-        .client = ctx.client.incRef(),
-    }, specificWatchService);
+            std.debug.warn("Failed to link client to daemon: '{}'", .{err_msg});
+            ctx.client.ptr.?.print("err {}!", err_msg);
+            return;
+        }
+
+        if (opcode == 2 or opcode == 3) {
+            const data_msg = try deserializeString(ctx.state.allocator, &deserializer);
+            defer ctx.state.allocator.free(data_msg);
+
+            const std_name = if (opcode == 2) "stdout" else "stderr";
+            ctx.client.ptr.?.print("data;{};{};{}", .{ ctx.service.name, std_name, data_msg });
+        }
+    }
 }
 
 pub const SpecificWatchType = enum { Out, Err };
