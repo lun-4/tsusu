@@ -106,11 +106,18 @@ pub fn watchService(ctx: WatchServiceContext) !void {
     const read_fd = pipes[0];
     const write_fd = pipes[1];
 
-    // service logger owns write_fd, we must not close it
-    defer std.os.close(read_fd);
-
     // give write_fd to service logger thread
     try ServiceLogger.addOutputFd(service.state.Running.logger_thread, write_fd);
+
+    // service logger owns write_fd, we must not close it
+    defer {
+        ServiceLogger.removeOutputFd(service.state.Running.logger_thread, write_fd) catch |err| {
+            ctx.state.logger.info("failed to remove client fd {}: {}\n", .{ write_fd, err });
+        };
+
+        // always close our read_fd, though
+        std.os.close(read_fd);
+    }
 
     // read from read_fd in a loop
     var read_file = std.fs.File{ .handle = read_fd };

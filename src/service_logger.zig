@@ -7,6 +7,7 @@ const util = @import("util.zig");
 pub const LoggerOpCode = enum(u8) {
     Stop = 1,
     AddClient = 2,
+    RemoveClient = 3,
 };
 
 const FdList = std.ArrayList(std.os.fd_t);
@@ -63,6 +64,15 @@ pub const ServiceLogger = struct {
         try serializer.serialize(output_fd);
     }
 
+    /// Remove the file descriptor from the output fd list.
+    /// MUST be called as deinitialization.
+    pub fn removeOutputFd(logger_fd: std.os.fd_t, output_fd: std.os.fd_t) !void {
+        var file = std.fs.File{ .handle = logger_fd };
+        var serializer = daemon.MsgSerializer.init(file.writer());
+        try serializer.serialize(@as(u8, 3));
+        try serializer.serialize(output_fd);
+    }
+
     pub const Std = enum { Out, Err };
 
     pub fn handleProcessStream(self: *Self, ctx: Context, typ: Std, fd: std.os.fd_t, file: std.fs.File) !void {
@@ -82,18 +92,23 @@ pub const ServiceLogger = struct {
             var client_file = std.fs.File{ .handle = client_fd };
             var serializer = daemon.MsgSerializer.init(client_file.writer());
 
-            // TODO: there may be some contention here if the client closes
-            // the socket if it closes while we try to read data
+            // TODO: remove client from client_fds array on error
 
-            // XXX: remove client from client_fds array on error
             serializer.serialize(@as(u8, if (typ == .Out) 2 else 3)) catch |err| {
                 std.debug.warn("got error on writing to client fd {}: {}", .{ client_fd, err });
                 continue;
             };
 
-            serializer.serialize(@intCast(u16, msg.len)) catch continue;
+            serializer.serialize(@intCast(u16, msg.len)) catch |err| {
+                std.debug.warn("got error on writing to client fd {}: {}", .{ client_fd, err });
+                continue;
+            };
+
             for (msg) |byte| {
-                serializer.serialize(byte) catch continue;
+                serializer.serialize(byte) catch |err| {
+                    std.debug.warn("got error on writing to client fd {}: {}", .{ client_fd, err });
+                    continue;
+                };
             }
         }
     }
@@ -130,6 +145,20 @@ pub const ServiceLogger = struct {
                 };
 
                 ctx.state.logger.info("service logger for {} got client fd {}", .{ ctx.service.name, client_fd });
+            },
+
+            .RemoveClient => {
+                const client_fd = try deserializer.deserialize(std.os.fd_t);
+
+                for (self.client_fds.items) |fd, idx| {
+                    if (fd == client_fd) {
+                        const fd_at_idx = self.client_fds.orderedRemove(idx);
+                        std.debug.assert(fd_at_idx == client_fd);
+                        break;
+                    }
+                }
+
+                ctx.state.logger.info("service logger for {} removed client fd {}", .{ ctx.service.name, client_fd });
             },
         }
     }
