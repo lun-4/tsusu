@@ -143,7 +143,7 @@ pub fn watchService(ctx: WatchServiceContext) !void {
             defer ctx.state.allocator.free(data_msg);
 
             const std_name = if (opcode == 2) "stdout" else "stderr";
-            ctx.client.ptr.?.print("data;{};{};{}", .{ ctx.service.name, std_name, data_msg }) catch |err| {
+            ctx.client.ptr.?.print("data;{};{};{}!", .{ ctx.service.name, std_name, data_msg }) catch |err| {
                 if (err == error.Closed) {
                     // if client is closed, don't care
                     return;
