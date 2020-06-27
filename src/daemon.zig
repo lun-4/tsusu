@@ -502,6 +502,8 @@ fn readFromSignalFd(allocator: *std.mem.Allocator, logger: *FileLogger, signal_f
 
     logger.info("got SIGINT or SIGTERM, stopping!", .{});
 
+    // TODO: stop all services one by one
+
     const pidpath = try helpers.getPathFor(allocator, .Pid);
     const sockpath = try helpers.getPathFor(allocator, .Sock);
 
