@@ -77,6 +77,14 @@ pub const ServiceLogger = struct {
         _ = try file.write(msg);
     }
 
+    fn sendError(ctx: Context, serializer: var, error_message: []const u8) void {
+        serializer.serialize(@as(u8, 1)) catch return;
+        serializer.serialize(@intCast(u16, error_message.len)) catch return;
+        for (error_message) |byte| {
+            serializer.serialize(byte) catch return;
+        }
+    }
+
     pub fn handleSignalMessage(self: *Self, ctx: Context) !void {
         var file = std.fs.File{ .handle = ctx.message_fd };
         var stream = file.inStream();
@@ -95,10 +103,9 @@ pub const ServiceLogger = struct {
 
                 self.client_fds.append(client_fd) catch |err| {
                     var serializer = daemon.MsgSerializer.init(file.writer());
-                    serializer.serialize(@as(u8, 1)) catch |write_err| {
-                        ctx.state.logger.info("service logger for {}, got client fd {}: OOM, ignoring", .{client_fd});
-                        return;
-                    };
+                    ctx.state.logger.info("service logger for {}, got client fd {}: OOM, ignoring", .{ ctx.service.name, client_fd });
+                    self.sendError(ctx, serializer, "out of memory");
+                    return;
                 };
 
                 ctx.state.logger.info("service logger for {} got client fd {}", .{client_fd});
