@@ -106,10 +106,11 @@ pub fn watchService(ctx: WatchServiceContext) !void {
     const read_fd = pipes[0];
     const write_fd = pipes[1];
 
-    // XXX: give write_fd to service logger thread
+    // give write_fd to service logger thread
+    try ServiceLogger.addOutputFd(service.state.Running.logger_thread, write_fd);
 
     // read from read_fd in a loop
-    var read_file = std.fs.File{ .handle = read_file };
+    var read_file = std.fs.File{ .handle = read_fd };
     var deserializer = daemon.MsgDeserializer.init(read_file.reader());
     while (true) {
         const opcode = try deserializer.deserialize(u8);
@@ -118,8 +119,7 @@ pub fn watchService(ctx: WatchServiceContext) !void {
             defer ctx.state.allocator.free(err_msg);
 
             std.debug.warn("Failed to link client to daemon: '{}'", .{err_msg});
-            ctx.client.ptr.?.print("err {}!", err_msg);
-            return;
+            try ctx.client.ptr.?.print("err {}!", .{err_msg});
         }
 
         if (opcode == 2 or opcode == 3) {
@@ -127,7 +127,7 @@ pub fn watchService(ctx: WatchServiceContext) !void {
             defer ctx.state.allocator.free(data_msg);
 
             const std_name = if (opcode == 2) "stdout" else "stderr";
-            ctx.client.ptr.?.print("data;{};{};{}", .{ ctx.service.name, std_name, data_msg });
+            try ctx.client.ptr.?.print("data;{};{};{}", .{ ctx.service.name, std_name, data_msg });
         }
     }
 }

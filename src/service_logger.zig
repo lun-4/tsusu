@@ -9,7 +9,7 @@ pub const LoggerOpCode = enum(u8) {
     AddClient = 2,
 };
 
-const FdList = ArrayList(std.os.fd_t);
+const FdList = std.ArrayList(std.os.fd_t);
 
 // When a client adds its file descriptor to the service logger via the
 // AddClient command, the ServiceLogger will reply with op codes and some basic
@@ -98,17 +98,17 @@ pub const ServiceLogger = struct {
             },
 
             .AddClient => {
-                const client_fd = try deserializer.deserialize(std.fs.fd_t);
-                var file = std.fs.File{ .handle = client_fd };
+                const client_fd = try deserializer.deserialize(std.os.fd_t);
+                var client_file = std.fs.File{ .handle = client_fd };
+                var serializer = daemon.MsgSerializer.init(client_file.writer());
 
                 self.client_fds.append(client_fd) catch |err| {
-                    var serializer = daemon.MsgSerializer.init(file.writer());
                     ctx.state.logger.info("service logger for {}, got client fd {}: OOM, ignoring", .{ ctx.service.name, client_fd });
-                    self.sendError(ctx, serializer, "out of memory");
+                    @This().sendError(ctx, &serializer, "out of memory");
                     return;
                 };
 
-                ctx.state.logger.info("service logger for {} got client fd {}", .{client_fd});
+                ctx.state.logger.info("service logger for {} got client fd {}", .{ ctx.service.name, client_fd });
             },
         }
     }
@@ -172,7 +172,7 @@ pub const ServiceLogger = struct {
             .{ ctx.service.name, stdout_logfile_path, stderr_logfile_path },
         );
 
-        var self = Self{ .client_fds = FdList.init(state.allocator) };
+        var self = Self{ .client_fds = FdList.init(ctx.state.allocator) };
         defer self.deinit();
 
         while (true) {
