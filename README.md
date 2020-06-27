@@ -2,7 +2,7 @@
 
 proof of concept userland process manager
 
-planned to superseed my use of [pm2](pm2.io)
+planned to superseed my use of [pm2](https://pm2.keymetrics.io)
 
 ## notes
 
