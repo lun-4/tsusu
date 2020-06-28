@@ -6,8 +6,6 @@ const util = @import("util.zig");
 /// Op code table for incoming messages to a service logger thread
 pub const LoggerOpCode = enum(u8) {
     Stop = 1,
-    AddClient = 2,
-    RemoveClient = 3,
 };
 
 const FdList = std.ArrayList(std.os.fd_t);
@@ -27,7 +25,7 @@ const FdList = std.ArrayList(std.os.fd_t);
 pub const ServiceLogger = struct {
     pub const Context = struct {
         state: *daemon.DaemonState,
-        service: *daemon.ServiceDecl,
+        service: *daemon.Service,
 
         /// Standard file descriptors of the child process.
         stdout: std.os.fd_t,
@@ -36,15 +34,6 @@ pub const ServiceLogger = struct {
         /// File descriptor used to read the sent commands
         /// to the service logger.
         message_fd: std.os.fd_t,
-    };
-
-    /// Internal thread state
-    pub const Self = struct {
-        client_fds: FdList,
-
-        pub fn deinit(self: *Self) void {
-            self.client_fds.deinit();
-        }
     };
 
     /// Politely request for the service logger thread to stop.
@@ -75,7 +64,7 @@ pub const ServiceLogger = struct {
 
     pub const Std = enum { Out, Err };
 
-    pub fn handleProcessStream(self: *Self, ctx: Context, typ: Std, fd: std.os.fd_t, file: std.fs.File) !void {
+    pub fn handleProcessStream(ctx: Context, typ: Std, fd: std.os.fd_t, file: std.fs.File) !void {
         // poll() is level-triggered, that means we can just read 512 bytes
         // then hand off to the next poll() call, which will still signal
         // the socket as available.
@@ -88,7 +77,7 @@ pub const ServiceLogger = struct {
         // the client fds to write to
         _ = try file.write(msg);
 
-        for (self.client_fds.items) |client_fd, idx| {
+        for (ctx.service.logger_client_fds.items) |client_fd, idx| {
             var client_file = std.fs.File{ .handle = client_fd };
             var serializer = daemon.MsgSerializer.init(client_file.writer());
 
@@ -121,7 +110,7 @@ pub const ServiceLogger = struct {
         }
     }
 
-    pub fn handleSignalMessage(self: *Self, ctx: Context) !void {
+    pub fn handleSignalMessage(ctx: Context) !void {
         var file = std.fs.File{ .handle = ctx.message_fd };
         var stream = file.inStream();
         var deserializer = daemon.MsgDeserializer.init(stream);
@@ -131,34 +120,6 @@ pub const ServiceLogger = struct {
             .Stop => {
                 ctx.state.logger.info("service logger for {} got stop signal", .{ctx.service.name});
                 return error.ShouldStop;
-            },
-
-            .AddClient => {
-                const client_fd = try deserializer.deserialize(std.os.fd_t);
-                var client_file = std.fs.File{ .handle = client_fd };
-                var serializer = daemon.MsgSerializer.init(client_file.writer());
-
-                self.client_fds.append(client_fd) catch |err| {
-                    ctx.state.logger.info("service logger for {}, got client fd {}: OOM, ignoring", .{ ctx.service.name, client_fd });
-                    @This().sendError(ctx, &serializer, "out of memory");
-                    return;
-                };
-
-                ctx.state.logger.info("service logger for {} got client fd {}", .{ ctx.service.name, client_fd });
-            },
-
-            .RemoveClient => {
-                const client_fd = try deserializer.deserialize(std.os.fd_t);
-
-                for (self.client_fds.items) |fd, idx| {
-                    if (fd == client_fd) {
-                        const fd_at_idx = self.client_fds.orderedRemove(idx);
-                        std.debug.assert(fd_at_idx == client_fd);
-                        break;
-                    }
-                }
-
-                ctx.state.logger.info("service logger for {} removed client fd {}", .{ ctx.service.name, client_fd });
             },
         }
     }
@@ -222,9 +183,6 @@ pub const ServiceLogger = struct {
             .{ ctx.service.name, stdout_logfile_path, stderr_logfile_path },
         );
 
-        var self = Self{ .client_fds = FdList.init(ctx.state.allocator) };
-        defer self.deinit();
-
         while (true) {
             const available = try std.os.poll(&sockets, -1);
             if (available == 0) {
@@ -236,11 +194,11 @@ pub const ServiceLogger = struct {
                 if (pollfd.revents == 0) continue;
 
                 if (pollfd.fd == ctx.stdout) {
-                    try @This().handleProcessStream(&self, ctx, .Out, pollfd.fd, stdout_logfile);
+                    try @This().handleProcessStream(ctx, .Out, pollfd.fd, stdout_logfile);
                 } else if (pollfd.fd == ctx.stderr) {
-                    try @This().handleProcessStream(&self, ctx, .Err, pollfd.fd, stderr_logfile);
+                    try @This().handleProcessStream(ctx, .Err, pollfd.fd, stderr_logfile);
                 } else if (pollfd.fd == ctx.message_fd) {
-                    @This().handleSignalMessage(&self, ctx) catch |err| {
+                    @This().handleSignalMessage(ctx) catch |err| {
                         if (err == error.ShouldStop) return else return err;
                     };
                 }

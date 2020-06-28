@@ -10,7 +10,7 @@ const ServiceLogger = @import("service_logger.zig").ServiceLogger;
 
 pub const SupervisorContext = struct {
     state: *DaemonState,
-    service: *ServiceDecl,
+    service: *Service,
 };
 
 pub fn superviseProcess(ctx: SupervisorContext) !void {

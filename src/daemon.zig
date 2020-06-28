@@ -20,6 +20,8 @@ const HeapRc = @import("rc.zig").HeapRc;
 const Client = @import("client.zig").Client;
 pub const RcClient = HeapRc(Client);
 
+pub const FdList = std.ArrayList(std.os.fd_t);
+
 pub const ServiceStateType = enum(u8) {
     NotRunning,
     Running,
@@ -48,11 +50,28 @@ pub const ServiceState = union(ServiceStateType) {
 
 pub const Service = struct {
     name: []const u8,
-    path: []const u8,
-    supervisor: ?*std.Thread = null,
+    cmdline: []const u8,
 
     state: ServiceState = ServiceState{ .NotRunning = {} },
     stop_flag: bool = false,
+
+    /// List of file descriptors for clients that want to
+    /// have logs of the service fanned out to them.
+    logger_client_fds: FdList,
+
+    pub fn addLoggerClient(self: *@This(), fd: std.os.fd_t) !void {
+        try self.logger_client_fds.append(fd);
+    }
+
+    pub fn removeLoggerClient(self: *@This(), client_fd: std.os.fd_t) void {
+        for (self.logger_client_fds.items) |fd, idx| {
+            if (fd == client_fd) {
+                const fd_at_idx = self.logger_client_fds.orderedRemove(idx);
+                std.debug.assert(fd_at_idx == client_fd);
+                break;
+            }
+        }
+    }
 };
 
 pub const ServiceMap = std.StringHashMap(*Service);
@@ -182,7 +201,6 @@ pub const DaemonState = struct {
         key: []const u8,
         service: *Service,
     ) !void {
-        self.logger.info("serv: {} {}", .{ key, service.path });
         try stream.print("{},", .{key});
 
         const state_string = switch (service.state) {
@@ -203,17 +221,10 @@ pub const DaemonState = struct {
         _ = try stream.write("!");
     }
 
-    pub fn addSupervisor(self: *@This(), service: ServiceDecl, thread: *std.Thread) !void {
-        var service_ptr = try self.allocator.create(Service);
-        service_ptr.* = .{
-            .name = service.name,
-            .path = service.cmdline,
-            .supervisor = thread,
-        };
-
+    pub fn addService(self: *@This(), name: []const u8, service: *Service) !void {
         _ = try self.services.put(
-            service.name,
-            service_ptr,
+            name,
+            service,
         );
     }
 
@@ -358,15 +369,12 @@ fn readManyFromClient(
             // use Service instead of ServiceDecl. we should
             // remove ServiceDecl
 
-            var decl = try allocator.create(ServiceDecl);
-            decl.* =
-                ServiceDecl{ .name = service.name, .cmdline = service.path };
-
             const supervisor_thread = try std.Thread.spawn(
-                SupervisorContext{ .state = state, .service = decl },
+                SupervisorContext{ .state = state, .service = service },
                 superviseProcess,
             );
-            try state.addSupervisor(decl.*, supervisor_thread);
+
+            std.time.sleep(250 * std.time.ns_per_ms);
             try state.writeServices(stream);
             return;
         }
@@ -378,9 +386,13 @@ fn readManyFromClient(
         };
         logger.info("got service start: {} {}", .{ service_name, service_cmdline });
 
-        var service = try allocator.create(ServiceDecl);
+        var service = try allocator.create(Service);
         service.* =
-            ServiceDecl{ .name = service_name, .cmdline = service_cmdline };
+            Service{
+            .name = service_name,
+            .cmdline = service_cmdline,
+            .logger_client_fds = FdList.init(state.allocator),
+        };
 
         logger.info("starting service {} with cmdline {}", .{ service_name, service_cmdline });
 
@@ -390,7 +402,8 @@ fn readManyFromClient(
             SupervisorContext{ .state = state, .service = service },
             superviseProcess,
         );
-        try state.addSupervisor(service.*, supervisor_thread);
+
+        try state.addService(service_name, service);
 
         // TODO: remove this, make starting itself run in a thread.
         std.time.sleep(250 * std.time.ns_per_ms);

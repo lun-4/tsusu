@@ -107,16 +107,15 @@ pub fn watchService(ctx: WatchServiceContext) !void {
     const write_fd = pipes[1];
 
     // give write_fd to service logger thread
-    try ServiceLogger.addOutputFd(service.state.Running.logger_thread, write_fd);
+    try service.addLoggerClient(write_fd);
 
-    // service logger owns write_fd, we must not close it
     defer {
-        ServiceLogger.removeOutputFd(service.state.Running.logger_thread, write_fd) catch |err| {
-            ctx.state.logger.info("failed to remove client fd {}: {}\n", .{ write_fd, err });
-        };
+        service.removeLoggerClient(write_fd);
 
-        // always close our read_fd, though
+        // this thread owns the lifetime of both fds, so it must
+        // close both (after removing the references to them in the service)
         std.os.close(read_fd);
+        std.os.close(write_fd);
     }
 
     // read from read_fd in a loop
@@ -150,47 +149,5 @@ pub fn watchService(ctx: WatchServiceContext) !void {
                 } else return err;
             };
         }
-    }
-}
-
-pub const SpecificWatchType = enum { Out, Err };
-
-pub const SpecificWatchServiceContext = struct {
-    state: *DaemonState,
-    typ: SpecificWatchType,
-    service: *Service,
-    client: *RcClient,
-    in_fd: std.os.fd_t,
-};
-
-fn specificWatchService(ctx: SpecificWatchServiceContext) !void {
-    std.debug.warn("specific watch client ptr={x}\n", .{@ptrToInt(ctx.client.ptr.?)});
-    defer ctx.client.decRef();
-
-    var buf: [128]u8 = undefined;
-    const prefix = switch (ctx.typ) {
-        .Out => "stdout",
-        .Err => "stderr",
-    };
-    const fd_name = try std.fmt.bufPrint(&buf, "{}_{}", .{ ctx.service.name, prefix });
-    const new_fd = try std.os.memfd_create(fd_name, 0);
-
-    // TODO: handle resource errors here
-    try std.os.dup2(ctx.in_fd, new_fd);
-
-    var duped_stream = std.fs.File{ .handle = new_fd };
-    defer duped_stream.close();
-
-    // TODO: handle when the process closes and
-    // we likely die in this loop
-
-    while (true) {
-        var line_buf: [512]u8 = undefined;
-        const bytecount = try duped_stream.read(&line_buf);
-        const stream_data = line_buf[0..bytecount];
-        ctx.client.ptr.?.print("data;{};{};{}!", .{ ctx.service.name, prefix, stream_data }) catch |err| {
-            ctx.state.logger.info("error while sending stream to client: {}", .{err});
-            return;
-        };
     }
 }
