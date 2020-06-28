@@ -16,6 +16,7 @@ pub const SupervisorContext = struct {
 pub fn superviseProcess(ctx: SupervisorContext) !void {
     var state = ctx.state;
     var allocator = state.allocator;
+    var service = ctx.service;
 
     state.logger.info("supervisor start\n", .{});
 
@@ -29,9 +30,7 @@ pub fn superviseProcess(ctx: SupervisorContext) !void {
 
     state.logger.info("sup:{}: arg0 = {}\n", .{ ctx.service.name, argv.items[0] });
 
-    var kv = state.services.get(ctx.service.name).?;
-
-    while (!kv.value.stop_flag) {
+    while (!service.stop_flag) {
         var proc = try std.ChildProcess.init(argv.items, allocator);
 
         proc.stdout_behavior = .Pipe;
@@ -89,6 +88,12 @@ pub fn superviseProcess(ctx: SupervisorContext) !void {
             else => unreachable,
         }
 
-        std.time.sleep(5 * std.time.ns_per_s);
+        // if the service is set to stop, we shouldn't try to wait and then
+        // stop our loop. stop as soon as possible.
+
+        // this prevents the supervisor thread from living more than it should
+        if (!service.stop_flag) break;
+
+        std.time.sleep(2 * std.time.ns_per_s);
     }
 }
