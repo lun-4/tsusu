@@ -13,6 +13,9 @@ pub const SupervisorContext = struct {
     service: *Service,
 };
 
+const RECONN_RETRY_CAP = 1000;
+const RECONN_RETRY_BASE = 700;
+
 pub fn superviseProcess(ctx: SupervisorContext) !void {
     var state = ctx.state;
     var allocator = state.allocator;
@@ -29,6 +32,8 @@ pub fn superviseProcess(ctx: SupervisorContext) !void {
     }
 
     state.logger.info("sup:{}: arg0 = {}\n", .{ ctx.service.name, argv.items[0] });
+
+    var retries: u32 = 0;
 
     while (!service.stop_flag) {
         var proc = try std.ChildProcess.init(argv.items, allocator);
@@ -79,6 +84,10 @@ pub fn superviseProcess(ctx: SupervisorContext) !void {
 
         switch (term_result) {
             .Exited, .Signal, .Stopped, .Unknown => |exit_code| {
+
+                // reset retry count when the program exited cleanly
+                if (exit_code == 0) retries = 0;
+
                 state.pushMessage(.{
                     .ServiceExited = .{ .name = ctx.service.name, .exit_code = exit_code },
                 }) catch |err| {
@@ -95,5 +104,23 @@ pub fn superviseProcess(ctx: SupervisorContext) !void {
         if (!service.stop_flag) break;
 
         std.time.sleep(2 * std.time.ns_per_s);
+
+        // calculations are done in the millisecond range
+        const seed = @truncate(u64, @bitCast(u128, std.time.nanoTimestamp()));
+        var r = std.rand.DefaultPrng.init(seed);
+
+        const sleep_ms = r.random.uintLessThan(
+            u32,
+            std.math.min(
+                @as(u32, RECONN_RETRY_CAP),
+                @as(u32, RECONN_RETRY_BASE * std.math.pow(u32, @as(u32, 2), retries)),
+            ),
+        );
+
+        std.debug.warn("sleeping '{}' for {}ms\n", .{ ctx.service.name, sleep_ms });
+
+        std.time.sleep(sleep_ms * std.time.ns_per_ms);
+
+        retries += 1;
     }
 }
