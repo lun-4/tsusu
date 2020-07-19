@@ -226,8 +226,8 @@ pub const DaemonState = struct {
             .Stopped => |code| try stream.print("2,{}", .{code}),
             .Restarting => |data| {
                 // show remaining amount of ns until service restarts fully
-                const current_clock = util.monotonicRead();
-                const end_ts_ns = data.clock_ns + data.sleep_ns;
+                const current_clock = @intCast(i64, util.monotonicRead());
+                const end_ts_ns = @intCast(i64, data.clock_ns + data.sleep_ns);
                 const remaining_ns = current_clock - end_ts_ns;
                 try stream.print("3,{},{}", .{ data.exit_code, remaining_ns });
             },

@@ -160,6 +160,8 @@ pub fn printServices(msg: []const u8) !void {
 
         std.debug.warn("{} | ", .{name});
 
+        std.debug.warn("'{}'\n", .{service_line});
+
         switch (state) {
             0 => std.debug.warn("not running\t\t0\t0%\t0kb", .{}),
             1 => {
@@ -180,8 +182,11 @@ pub fn printServices(msg: []const u8) !void {
             },
             3 => {
                 const exit_code = try std.fmt.parseInt(u32, serv_it.next().?, 10);
-                const remaining_ns = try std.fmt.parseInt(u64, serv_it.next().?, 10);
-                std.debug.warn("restarting (code {}, comes in {}ms)\t\t0%\t0kb", .{ exit_code, remaining_ns / std.time.ns_per_ms });
+                const remaining_ns = try std.fmt.parseInt(i64, serv_it.next().?, 10);
+                std.debug.warn("restarting (code {}, comes in {}ms)\t\t0%\t0kb", .{
+                    exit_code,
+                    @divTrunc(remaining_ns, std.time.ns_per_ms),
+                });
             },
             else => unreachable,
         }
