@@ -17,6 +17,31 @@ pub fn prettyMemoryUsage(buffer: []u8, kilobytes: u64) ![]const u8 {
     }
 }
 
+pub fn read(fd: std.os.fd_t, buf: []u8) !usize {
+    const max_count = switch (std.Target.current.os.tag) {
+        .linux => 0x7ffff000,
+        else => std.math.maxInt(isize),
+    };
+    const adjusted_len = std.math.min(max_count, buf.len);
+
+    const rc = std.os.system.read(fd, buf.ptr, adjusted_len);
+    switch (std.os.errno(rc)) {
+        0 => return @intCast(usize, rc),
+        std.os.EINVAL => unreachable,
+        std.os.EFAULT => unreachable,
+        // probably bad to do this mapping
+        std.os.EINTR, std.os.EAGAIN => return error.WouldBlock,
+        std.os.EBADF => return error.NotOpenForReading, // Can be a race condition.
+        std.os.EIO => return error.InputOutput,
+        std.os.EISDIR => return error.IsDir,
+        std.os.ENOBUFS => return error.SystemResources,
+        std.os.ENOMEM => return error.SystemResources,
+        std.os.ECONNRESET => return error.ConnectionResetByPeer,
+        std.os.ETIMEDOUT => return error.ConnectionTimedOut,
+        else => |err| return std.os.unexpectedErrno(err),
+    }
+}
+
 /// Wraps a file descriptor with a mutex to prevent
 /// data corruption by separate threads, and keeps
 /// a `closed` flag to stop threads from trying to

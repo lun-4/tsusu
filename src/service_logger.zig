@@ -2,6 +2,7 @@ const std = @import("std");
 
 const daemon = @import("daemon.zig");
 const util = @import("util.zig");
+const read = util.read;
 
 /// Op code table for incoming messages to a service logger thread
 pub const LoggerOpCode = enum(u8) {
@@ -69,7 +70,7 @@ pub const ServiceLogger = struct {
         // then hand off to the next poll() call, which will still signal
         // the socket as available.
         var buf: [512]u8 = undefined;
-        const bytes = try std.os.read(fd, &buf);
+        const bytes = try read(fd, &buf);
         const msg = buf[0..bytes];
 
         // formatting of the logfile is done by the app, and not us
