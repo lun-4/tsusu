@@ -218,7 +218,7 @@ pub const DaemonState = struct {
             .Restarting => |data| {
                 // show remaining amount of ns until service restarts fully
                 const current_clock = util.monotonicRead();
-                const end_ts_ns = data.clock_ts_ns + data.sleep_ns;
+                const end_ts_ns = data.clock_ns + data.sleep_ns;
                 const remaining_ns = current_clock - end_ts_ns;
                 try stream.print("3,{}", .{remaining_ns});
             },

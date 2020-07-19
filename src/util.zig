@@ -125,7 +125,7 @@ pub const WrappedReader = struct {
 };
 
 pub fn monotonicRead() u64 {
-    var ts: os.timespec = undefined;
-    os.clock_gettime(monotonic_clock_id, &ts) catch unreachable;
-    return @intCast(u64, ts.tv_sec) * @as(u64, ns_per_s) + @intCast(u64, ts.tv_nsec);
+    var ts: std.os.timespec = undefined;
+    std.os.clock_gettime(std.os.CLOCK_MONOTONIC, &ts) catch unreachable;
+    return @intCast(u64, ts.tv_sec) * @as(u64, std.time.ns_per_s) + @intCast(u64, ts.tv_nsec);
 }
