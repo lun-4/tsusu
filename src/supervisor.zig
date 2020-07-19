@@ -36,11 +36,14 @@ pub fn superviseProcess(ctx: SupervisorContext) !void {
     var retries: u32 = 0;
 
     while (!service.stop_flag) {
+        state.logger.info("trying to start service '{}'", .{ctx.service.name});
+
         var proc = try std.ChildProcess.init(argv.items, allocator);
 
         proc.stdout_behavior = .Pipe;
         proc.stderr_behavior = .Pipe;
 
+        state.logger.info("service '{}' spawn", .{ctx.service.name});
         try proc.spawn();
 
         // spawn thread for logging of stderr and stdout
@@ -73,7 +76,9 @@ pub fn superviseProcess(ctx: SupervisorContext) !void {
             state.logger.info("Failed to send started message to daemon: {}", .{err});
         };
 
+        state.logger.info("service '{}' wait", .{ctx.service.name});
         const term_result = try proc.wait();
+        state.logger.info("service '{}' waited result {}", .{ ctx.service.name, term_result });
 
         // we don't care about the status of the process if we're here,
         // since it exited already, we must destroy the threads
@@ -101,9 +106,8 @@ pub fn superviseProcess(ctx: SupervisorContext) !void {
         // stop our loop. stop as soon as possible.
 
         // this prevents the supervisor thread from living more than it should
-        if (!service.stop_flag) break;
-
-        std.time.sleep(2 * std.time.ns_per_s);
+        state.logger.info("service '{}' stop? {}", .{ ctx.service.name, service.stop_flag });
+        if (service.stop_flag) break;
 
         // calculations are done in the millisecond range
         const seed = @truncate(u64, @bitCast(u128, std.time.nanoTimestamp()));
@@ -120,6 +124,8 @@ pub fn superviseProcess(ctx: SupervisorContext) !void {
         std.debug.warn("sleeping '{}' for {}ms\n", .{ ctx.service.name, sleep_ms });
 
         std.time.sleep(sleep_ms * std.time.ns_per_ms);
+
+        std.debug.warn("slept '{}' for {}ms. stop_flag={}\n", .{ ctx.service.name, sleep_ms, service.stop_flag });
 
         retries += 1;
     }

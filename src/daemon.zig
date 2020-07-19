@@ -461,8 +461,6 @@ fn readManyFromClient(
 
         const kv_opt = state.services.get(service_name);
         if (kv_opt) |kv| {
-            kv.value.stop_flag = true;
-
             switch (kv.value.state) {
                 .Running => {},
                 else => {
