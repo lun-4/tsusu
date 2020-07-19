@@ -180,7 +180,8 @@ pub fn printServices(msg: []const u8) !void {
             },
             3 => {
                 const exit_code = try std.fmt.parseInt(u32, serv_it.next().?, 10);
-                std.debug.warn("restarting (code {})\t\t0%\t0kb", .{exit_code});
+                const remaining_ns = try std.fmt.parseInt(u64, serv_it.next().?, 10);
+                std.debug.warn("restarting (code {}, comes in {}ms)\t\t0%\t0kb", .{ exit_code, remaining_ns / std.time.ns_per_ms });
             },
             else => unreachable,
         }

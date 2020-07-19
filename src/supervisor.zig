@@ -88,8 +88,11 @@ pub fn superviseProcess(ctx: SupervisorContext) !void {
             state.logger.info("Failed to signal logger thread to stop: {}", .{err});
         };
 
+        var exit_code: u32 = undefined;
+
         switch (term_result) {
-            .Exited, .Signal, .Stopped, .Unknown => |exit_code| {
+            .Exited, .Signal, .Stopped, .Unknown => |term_code| {
+                exit_code = term_code;
 
                 // reset retry count when the program exited cleanly
                 if (exit_code == 0) retries = 0;
