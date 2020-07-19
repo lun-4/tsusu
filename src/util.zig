@@ -123,3 +123,9 @@ pub const WrappedReader = struct {
         return try self.file.read(data);
     }
 };
+
+pub fn monotonicRead() u64 {
+    var ts: os.timespec = undefined;
+    os.clock_gettime(monotonic_clock_id, &ts) catch unreachable;
+    return @intCast(u64, ts.tv_sec) * @as(u64, ns_per_s) + @intCast(u64, ts.tv_nsec);
+}

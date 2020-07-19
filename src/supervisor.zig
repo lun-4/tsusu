@@ -1,5 +1,6 @@
 const std = @import("std");
 const daemon = @import("daemon.zig");
+const util = @import("util.zig");
 
 const DaemonState = daemon.DaemonState;
 const ServiceDecl = daemon.ServiceDecl;
@@ -24,7 +25,7 @@ pub fn superviseProcess(ctx: SupervisorContext) !void {
     state.logger.info("supervisor start\n", .{});
 
     var argv = std.ArrayList([]const u8).init(allocator);
-    errdefer argv.deinit();
+    defer argv.deinit();
 
     var path_it = std.mem.split(ctx.service.cmdline, " ");
     while (path_it.next()) |component| {
@@ -121,9 +122,22 @@ pub fn superviseProcess(ctx: SupervisorContext) !void {
             ),
         );
 
+        const sleep_ns = sleep_ms * std.time.ns_per_ms;
+        const clock_ts = util.monotonicRead();
+
+        state.pushMessage(.{
+            .ServiceRestarting = .{
+                .name = ctx.service.name,
+                .clock_ts_ns = clock_ts,
+                .sleep_ns = sleep_ns,
+            },
+        }) catch |err| {
+            state.logger.info("Failed to send restarting message to daemon: {}", .{err});
+        };
+
         std.debug.warn("sleeping '{}' for {}ms\n", .{ ctx.service.name, sleep_ms });
 
-        std.time.sleep(sleep_ms * std.time.ns_per_ms);
+        std.time.sleep(sleep_ns);
 
         std.debug.warn("slept '{}' for {}ms. stop_flag={}\n", .{ ctx.service.name, sleep_ms, service.stop_flag });
 

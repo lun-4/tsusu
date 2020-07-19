@@ -3,6 +3,7 @@ const os = std.os;
 
 const Logger = @import("logger.zig").Logger;
 const helpers = @import("helpers.zig");
+const util = @import("util.zig");
 
 const supervisors = @import("supervisor.zig");
 const thread_commands = @import("thread_commands.zig");
@@ -44,7 +45,7 @@ pub const RunningState = struct {
 pub const ServiceState = union(ServiceStateType) {
     NotRunning: void,
     Running: RunningState,
-    Restarting: u32,
+    Restarting: struct { clock_ns: u64, sleep_ns: u64 },
     Stopped: u32,
 };
 
@@ -80,6 +81,7 @@ pub const FileLogger = Logger(std.fs.File.OutStream);
 pub const MessageOP = enum(u8) {
     ServiceStarted,
     ServiceExited,
+    ServiceRestarting,
 };
 
 pub const Message = union(MessageOP) {
@@ -92,6 +94,7 @@ pub const Message = union(MessageOP) {
         logger_thread: std.os.fd_t,
     },
     ServiceExited: struct { name: []const u8, exit_code: u32 },
+    ServiceRestarting: struct { name: []const u8, clock_ts_ns: u64, sleep_ns: u64 },
 };
 
 pub const ServiceDecl = struct {
@@ -192,6 +195,11 @@ pub const DaemonState = struct {
                 try serializeString(&serializer, data.name);
                 try serializer.serialize(data.exit_code);
             },
+            .ServiceRestarting => |data| {
+                try serializeString(&serializer, data.name);
+                try serializer.serialize(data.clock_ts_ns);
+                try serializer.serialize(data.sleep_ns);
+            },
         }
     }
 
@@ -207,7 +215,13 @@ pub const DaemonState = struct {
             .NotRunning => try stream.print("0", .{}),
             .Running => |data| try stream.print("1,{}", .{data.pid}),
             .Stopped => |code| try stream.print("2,{}", .{code}),
-            .Restarting => |code| try stream.print("3,{}", .{code}),
+            .Restarting => |data| {
+                // show remaining amount of ns until service restarts fully
+                const current_clock = util.monotonicRead();
+                const end_ts_ns = data.clock_ts_ns + data.sleep_ns;
+                const remaining_ns = current_clock - end_ts_ns;
+                try stream.print("3,{}", .{remaining_ns});
+            },
         };
 
         try stream.print(";", .{});
@@ -271,6 +285,23 @@ pub const DaemonState = struct {
                 const exit_code = try deserializer.deserialize(u32);
                 self.logger.info("serivce {} exited with status {}", .{ service_name, exit_code });
                 self.services.get(service_name).?.value.state = ServiceState{ .Stopped = exit_code };
+            },
+
+            .ServiceRestarting => {
+                const service_name = try deserializeString(self.allocator, &deserializer);
+                defer self.allocator.free(service_name);
+
+                const clock_ns = try deserializer.deserialize(u64);
+                const sleep_ns = try deserializer.deserialize(u64);
+
+                self.logger.info("serivce {} restarting, will be back in {}ns", .{ service_name, sleep_ns });
+
+                self.services.get(service_name).?.value.state = ServiceState{
+                    .Restarting = .{
+                        .clock_ns = clock_ns,
+                        .sleep_ns = sleep_ns,
+                    },
+                };
             },
         }
     }
