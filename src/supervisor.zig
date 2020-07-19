@@ -128,6 +128,7 @@ pub fn superviseProcess(ctx: SupervisorContext) !void {
         state.pushMessage(.{
             .ServiceRestarting = .{
                 .name = ctx.service.name,
+                .exit_code = exit_code,
                 .clock_ts_ns = clock_ts,
                 .sleep_ns = sleep_ns,
             },

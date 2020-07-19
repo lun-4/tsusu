@@ -45,7 +45,7 @@ pub const RunningState = struct {
 pub const ServiceState = union(ServiceStateType) {
     NotRunning: void,
     Running: RunningState,
-    Restarting: struct { clock_ns: u64, sleep_ns: u64 },
+    Restarting: struct { exit_code: u32, clock_ns: u64, sleep_ns: u64 },
     Stopped: u32,
 };
 
@@ -93,8 +93,16 @@ pub const Message = union(MessageOP) {
 
         logger_thread: std.os.fd_t,
     },
-    ServiceExited: struct { name: []const u8, exit_code: u32 },
-    ServiceRestarting: struct { name: []const u8, clock_ts_ns: u64, sleep_ns: u64 },
+    ServiceExited: struct {
+        name: []const u8,
+        exit_code: u32,
+    },
+    ServiceRestarting: struct {
+        name: []const u8,
+        exit_code: u32,
+        clock_ts_ns: u64,
+        sleep_ns: u64,
+    },
 };
 
 pub const ServiceDecl = struct {
@@ -197,6 +205,7 @@ pub const DaemonState = struct {
             },
             .ServiceRestarting => |data| {
                 try serializeString(&serializer, data.name);
+                try serializer.serialize(data.exit_code);
                 try serializer.serialize(data.clock_ts_ns);
                 try serializer.serialize(data.sleep_ns);
             },
@@ -220,7 +229,7 @@ pub const DaemonState = struct {
                 const current_clock = util.monotonicRead();
                 const end_ts_ns = data.clock_ns + data.sleep_ns;
                 const remaining_ns = current_clock - end_ts_ns;
-                try stream.print("3,{}", .{remaining_ns});
+                try stream.print("3,{},{}", .{ data.exit_code, remaining_ns });
             },
         };
 
@@ -291,6 +300,7 @@ pub const DaemonState = struct {
                 const service_name = try deserializeString(self.allocator, &deserializer);
                 defer self.allocator.free(service_name);
 
+                const exit_code = try deserializer.deserialize(u32);
                 const clock_ns = try deserializer.deserialize(u64);
                 const sleep_ns = try deserializer.deserialize(u64);
 
@@ -298,6 +308,7 @@ pub const DaemonState = struct {
 
                 self.services.get(service_name).?.value.state = ServiceState{
                     .Restarting = .{
+                        .exit_code = exit_code,
                         .clock_ns = clock_ns,
                         .sleep_ns = sleep_ns,
                     },
