@@ -195,7 +195,17 @@ pub const ServiceLogger = struct {
                 if (pollfd.revents == 0) continue;
 
                 if (pollfd.fd == ctx.stdout) {
-                    try @This().handleProcessStream(ctx, .Out, pollfd.fd, stdout_logfile);
+                    @This().handleProcessStream(ctx, .Out, pollfd.fd, stdout_logfile) catch |err| switch (err) {
+                        // The OS gives EBADF when the process got killed and we're
+                        // trying to read from its stdout/stderr fds. catch it and
+                        // also stop oureslves. supervisor's job is to restart this type of thread
+                        // later on.
+                        error.NotOpenForReading => {
+                            ctx.state.logger.info("service {} is likely dead", .{ctx.service.name});
+                            return;
+                        },
+                        else => return err,
+                    };
                 } else if (pollfd.fd == ctx.stderr) {
                     try @This().handleProcessStream(ctx, .Err, pollfd.fd, stderr_logfile);
                 } else if (pollfd.fd == ctx.message_fd) {
