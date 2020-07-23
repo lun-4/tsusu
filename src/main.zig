@@ -213,6 +213,9 @@ fn watchCommand(ctx: *Context, in_stream: anytype, out_stream: anytype) !void {
     while (true) {
         const msg = try in_stream.readUntilDelimiterAlloc(ctx.allocator, '!', 65535);
         defer ctx.allocator.free(msg);
+
+        // TODO handle when service is stopped
+
         var it = std.mem.split(msg, ";");
         _ = it.next();
         const service = it.next().?;
