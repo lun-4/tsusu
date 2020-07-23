@@ -38,7 +38,7 @@ pub const Client = struct {
         return try self.stream().write(data);
     }
 
-    pub fn print(self: *@This(), comptime fmt: []const u8, args: var) !void {
+    pub fn print(self: *@This(), comptime fmt: []const u8, args: anytype) !void {
         const held = self.lock.acquire();
         defer held.release();
         if (self.closed) return error.Closed;

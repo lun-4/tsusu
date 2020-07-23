@@ -1,12 +1,12 @@
 const std = @import("std");
 
-pub fn Logger(OutStream: var) type {
+pub fn Logger(OutStream: anytype) type {
     return struct {
         stream: OutStream,
         prefix: []const u8,
         lock: std.Mutex,
 
-        pub fn init(stream: var, prefix: []const u8) @This() {
+        pub fn init(stream: anytype, prefix: []const u8) @This() {
             return .{ .stream = stream, .prefix = prefix, .lock = std.Mutex.init() };
         }
 
@@ -15,7 +15,7 @@ pub fn Logger(OutStream: var) type {
         }
 
         /// Log a message.
-        pub fn info(self: *@This(), comptime fmt: []const u8, args: var) void {
+        pub fn info(self: *@This(), comptime fmt: []const u8, args: anytype) void {
             const held = self.lock.acquire();
             defer held.release();
 

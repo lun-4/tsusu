@@ -130,7 +130,7 @@ pub const MsgDeserializer = std.io.Deserializer(
 // Caller owns the returned memory.
 fn deserializeSlice(
     allocator: *std.mem.Allocator,
-    deserializer: var,
+    deserializer: anytype,
     comptime T: type,
     size: usize,
 ) ![]T {
@@ -144,7 +144,7 @@ fn deserializeSlice(
     return value;
 }
 
-fn deserializeString(allocator: *std.mem.Allocator, deserializer: var) ![]u8 {
+fn deserializeString(allocator: *std.mem.Allocator, deserializer: anytype) ![]u8 {
     const string_length = try deserializer.deserialize(u32);
     std.debug.assert(string_length > 0);
 
@@ -153,7 +153,7 @@ fn deserializeString(allocator: *std.mem.Allocator, deserializer: var) ![]u8 {
     return result;
 }
 
-fn serializeString(serializer: var, string: []const u8) !void {
+fn serializeString(serializer: anytype, string: []const u8) !void {
     try serializer.serialize(@intCast(u32, string.len));
     for (string) |byte| {
         try serializer.serialize(byte);
@@ -214,7 +214,7 @@ pub const DaemonState = struct {
 
     fn writeService(
         self: @This(),
-        stream: var,
+        stream: anytype,
         key: []const u8,
         service: *Service,
     ) !void {
@@ -236,7 +236,7 @@ pub const DaemonState = struct {
         try stream.print(";", .{});
     }
 
-    pub fn writeServices(self: @This(), stream: var) !void {
+    pub fn writeServices(self: @This(), stream: anytype) !void {
         var services_it = self.services.iterator();
         while (services_it.next()) |kv| {
             try self.writeService(stream, kv.key, kv.value);

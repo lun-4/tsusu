@@ -195,7 +195,7 @@ pub fn printServices(msg: []const u8) !void {
     }
 }
 
-fn stopCommand(ctx: *Context, in_stream: var, out_stream: var) !void {
+fn stopCommand(ctx: *Context, in_stream: anytype, out_stream: anytype) !void {
     const name = try (ctx.args_it.next(ctx.allocator) orelse @panic("expected name"));
     std.debug.warn("stopping '{}'\n", .{name});
 
@@ -205,7 +205,7 @@ fn stopCommand(ctx: *Context, in_stream: var, out_stream: var) !void {
     try printServices(list_msg);
 }
 
-fn watchCommand(ctx: *Context, in_stream: var, out_stream: var) !void {
+fn watchCommand(ctx: *Context, in_stream: anytype, out_stream: anytype) !void {
     const name = try (ctx.args_it.next(ctx.allocator) orelse @panic("expected name"));
     std.debug.warn("watching '{}'\n", .{name});
 

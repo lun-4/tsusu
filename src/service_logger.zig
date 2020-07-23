@@ -103,7 +103,7 @@ pub const ServiceLogger = struct {
         }
     }
 
-    fn sendError(ctx: Context, serializer: var, error_message: []const u8) void {
+    fn sendError(ctx: Context, serializer: anytype, error_message: []const u8) void {
         serializer.serialize(@as(u8, 1)) catch return;
         serializer.serialize(@intCast(u16, error_message.len)) catch return;
         for (error_message) |byte| {

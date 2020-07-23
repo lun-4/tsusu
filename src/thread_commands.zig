@@ -83,7 +83,7 @@ pub const WatchServiceContext = struct {
 };
 
 /// Caller owns the returned memory.
-fn deserializeString(allocator: *std.mem.Allocator, deserializer: var) ![]const u8 {
+fn deserializeString(allocator: *std.mem.Allocator, deserializer: anytype) ![]const u8 {
     const length = try deserializer.deserialize(u16);
 
     var msg = try allocator.alloc(u8, length);
