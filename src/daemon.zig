@@ -276,7 +276,7 @@ pub const DaemonState = struct {
                     "serivce {} started on pid {} stdout={} stderr={}",
                     .{ service_name, pid, stdout, stderr },
                 );
-                self.services.get(service_name).?.value.state = ServiceState{
+                self.services.get(service_name).?.state = ServiceState{
                     .Running = RunningState{
                         .pid = pid,
                         .stdout = stdout,
@@ -293,7 +293,7 @@ pub const DaemonState = struct {
 
                 const exit_code = try deserializer.deserialize(u32);
                 self.logger.info("serivce {} exited with status {}", .{ service_name, exit_code });
-                self.services.get(service_name).?.value.state = ServiceState{ .Stopped = exit_code };
+                self.services.get(service_name).?.state = ServiceState{ .Stopped = exit_code };
             },
 
             .ServiceRestarting => {
@@ -306,7 +306,7 @@ pub const DaemonState = struct {
 
                 self.logger.info("serivce {} restarting, will be back in {}ns", .{ service_name, sleep_ns });
 
-                self.services.get(service_name).?.value.state = ServiceState{
+                self.services.get(service_name).?.state = ServiceState{
                     .Restarting = .{
                         .exit_code = exit_code,
                         .clock_ns = clock_ns,
@@ -363,9 +363,9 @@ fn readManyFromClient(
 
     // reuse allocated RcClient in state, and if it doesnt exist, create
     // a new client.
-    var client_kv_opt = state.clients.get(pollfd.fd);
-    if (client_kv_opt) |client_kv| {
-        client = client_kv.value;
+    var client_opt = state.clients.get(pollfd.fd);
+    if (client_opt) |client_from_map| {
+        client = client_from_map;
     } else {
         // freeing of the RcClient and Client wrapped struct is done
         // by themselves. memory of this is managed via refcounting
@@ -396,11 +396,9 @@ fn readManyFromClient(
 
         // TODO: error handling on malformed messages
         const service_name = parts_it.next().?;
-        var existing_kv = state.services.get(service_name);
-        if (existing_kv != null) {
+        var service_opt = state.services.get(service_name);
+        if (service_opt) |service| {
             // start existing service
-            var service = existing_kv.?.value;
-
             service.stop_flag = false;
 
             // XXX: we just need to start the supervisor thread again
@@ -457,9 +455,9 @@ fn readManyFromClient(
         // TODO: error handling on malformed messages
         const service_name = parts_it.next().?;
 
-        const kv_opt = state.services.get(service_name);
-        if (kv_opt) |kv| {
-            try state.writeService(stream, kv.key, kv.value);
+        const service_opt = state.services.get(service_name);
+        if (service_opt) |service| {
+            try state.writeService(stream, service_name, service);
             try stream.print("!", .{});
         } else {
             try stream.print("err unknown service!", .{});
@@ -471,11 +469,11 @@ fn readManyFromClient(
         // TODO: error handling on malformed messages
         const service_name = parts_it.next().?;
 
-        const kv_opt = state.services.get(service_name);
-        if (kv_opt) |kv| {
-            kv.value.stop_flag = true;
+        const service_opt = state.services.get(service_name);
+        if (service_opt) |service| {
+            service.stop_flag = true;
 
-            switch (kv.value.state) {
+            switch (service.state) {
                 .Running => {},
                 else => {
                     try stream.print("err service not running!", .{});
@@ -486,7 +484,7 @@ fn readManyFromClient(
             _ = try std.Thread.spawn(
                 KillServiceContext{
                     .state = state,
-                    .service = kv.value,
+                    .service = service,
                     .client = client.incRef(),
                 },
                 killService,
@@ -501,9 +499,9 @@ fn readManyFromClient(
         // TODO: error handling on malformed messages
         const service_name = parts_it.next().?;
 
-        const kv_opt = state.services.get(service_name);
-        if (kv_opt) |kv| {
-            switch (kv.value.state) {
+        const service_opt = state.services.get(service_name);
+        if (service_opt) |service| {
+            switch (service.state) {
                 .Running => {},
                 else => {
                     try stream.print("err service not running!", .{});
@@ -514,7 +512,7 @@ fn readManyFromClient(
             _ = try std.Thread.spawn(
                 WatchServiceContext{
                     .state = state,
-                    .service = kv.value,
+                    .service = service,
                     .client = client.incRef(),
                 },
                 watchService,
@@ -672,17 +670,17 @@ pub fn main(logger: *FileLogger) anyerror!void {
 
                     // signal that the client must not be used, any other
                     // operations on it will give error.Closed
-                    var kv_opt = state.clients.get(pollfd.fd);
-                    if (kv_opt) |kv| {
+                    var client_opt = state.clients.get(pollfd.fd);
+                    if (client_opt) |client| {
                         // decrease reference for main thread and mark
                         // the fd as closed
 
                         // TODO: investigate why tsusu seems to destroy itself when
                         // we don't force-close the fd here, since everyone
                         // else should get EndOfStream, just like us...
-                        kv.value.ptr.?.close();
+                        client.ptr.?.close();
 
-                        kv.value.decRef();
+                        client.decRef();
                         _ = state.clients.remove(pollfd.fd);
                     }
 
